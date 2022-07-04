@@ -8,6 +8,8 @@
 #			 			-D FILE_OUT : export graph to file								#
 #			 			-D MAX_THREADS : max cuda threads 								#
 #			 			-D MAX_BLOCKS : max cuda blocks 								#
+#			 			-D TIME : enable time control	 								#
+#			 			-D NO_INPUT : remove enter clic 								#
 #																						#
 #########################################################################################
 */
@@ -27,8 +29,10 @@ Calculation of the succinct transitive closure given a hypergraph H, in a parall
 
 Work:
 	progetto.exe "grafo.txt"
-	(PRESS ENTER WHEN REQUEST)
 	
+Experimental:
+	inside copyaa remove comment around std::copy and compile with --std c++17 
+	end comment the openmp for cycle
 */
 
 
@@ -41,14 +45,28 @@ Work:
 #include <istream>
 #include <fstream>
 #include <algorithm>
+#include <chrono>
+#include<execution>
 
 //Massimo numero di threads su GPU e Block su GPU
+//numero threads su CPU
+int nThr;
 
 #ifndef MAX_THREADS
 #define MAX_THREADS 128
 #endif
 #ifndef MAX_BLOCKS
 #define MAX_BLOCKS 1
+#endif
+#ifdef NTHR
+	nThr = NTHR;
+#endif
+
+#ifdef TIME
+std::chrono::high_resolution_clock::time_point begin;
+std::chrono::high_resolution_clock::time_point end;
+unsigned long durata,durataRead;
+
 #endif
 
 
@@ -203,6 +221,20 @@ void writeGraph(int* Vertices, int num_vertices, Hyperarc* Edges, int num_edges,
 	myFile.close();
 }	
 
+/*   ## CPU ##
+Write operation time to file
+*/
+/*
+Input:
+	num_vertices : number of integers pointed from Vertices
+	num_edges : number of hyperarcs pointed from Edges
+*/
+void writeTime(int num_vertices, int num_edges){
+	std::ofstream myFile;
+	myFile.open("TimeSave.txt", std::fstream::app);
+	myFile << "<G " << num_vertices <<"," << num_edges <<" ("<<durata<<" ns)>\n";
+	myFile.close();
+}
 
 /*   ## GPU ##
 Find neighbors during one BFS step
@@ -352,14 +384,17 @@ Allocate new Edges array that contains the succint closure hyperarcs
 Allocate Temporary Array to copy to GPU the set of node of the hyperarcs
 
 */
+Hyperarc * Edges_DEV;
+int * Vertices_DEV;
+
 Hyperarc * graph_bfs_nieces(int * Vertices, int num_vertices, Hyperarc * Edges, const int num_edges, int node){
 	int * Cost_HOS, *Cost_DEV;
 	bool * Frontier_HOS, *Frontier_DEV;
 	bool * FrontierUpdate_HOS, *FrontierUpdate_DEV;
 	bool * Visited_HOS, *Visited_DEV;
-	int * Vertices_DEV;
+	
 	int * from;
-	Hyperarc * Edges_DEV, *newEdges;
+	Hyperarc *newEdges;
 	int sizeEdges=0;
 	
 	Cost_HOS = (int*) malloc(sizeof(int)*num_vertices);
@@ -374,8 +409,6 @@ Hyperarc * graph_bfs_nieces(int * Vertices, int num_vertices, Hyperarc * Edges, 
 	Visited_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
 	gpuErrchk(cudaMalloc((void**)&Visited_DEV, sizeof(bool)*num_vertices));
 	
-	gpuErrchk(cudaMalloc((void**)&Vertices_DEV, sizeof(int)*num_vertices));
-	gpuErrchk(cudaMalloc((void**)&Edges_DEV, sizeof(Hyperarc)*num_edges));
 	
 	
 	for(int i=0; i<num_vertices; i++){
@@ -393,19 +426,7 @@ Hyperarc * graph_bfs_nieces(int * Vertices, int num_vertices, Hyperarc * Edges, 
 	cudaMemcpy(Frontier_DEV, Frontier_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
 	cudaMemcpy(FrontierUpdate_DEV, FrontierUpdate_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
 	cudaMemcpy(Visited_DEV, Visited_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
-	cudaMemcpy(Vertices_DEV, Vertices, sizeof(int)*num_vertices, cudaMemcpyHostToDevice);
 	
-	for(int i=0; i<num_edges; i++){	
-		gpuErrchk(cudaMalloc((void**)&from, sizeof(int)*Edges[i].len_fr));
-		
-		cudaMemcpy(from, Edges[i].from, sizeof(int)*Edges[i].len_fr, cudaMemcpyHostToDevice);
-		
-		
-		Edges[i].from_dev = from;
-		
-	}
-	
-	cudaMemcpy(Edges_DEV, Edges, sizeof(Hyperarc)*num_edges, cudaMemcpyHostToDevice);
 	
 	int *next_HOS, *next_DEV;
 	
@@ -431,11 +452,9 @@ Hyperarc * graph_bfs_nieces(int * Vertices, int num_vertices, Hyperarc * Edges, 
 		
 	}
 	
-	gpuErrchk(cudaFree(Vertices_DEV));
 	gpuErrchk(cudaFree(Frontier_DEV));
 	gpuErrchk(cudaFree(FrontierUpdate_DEV));
 	gpuErrchk(cudaFree(Visited_DEV));
-	gpuErrchk(cudaFree(Edges_DEV));
 	
 	(free(Frontier_HOS));
 	(free(FrontierUpdate_HOS));
@@ -492,12 +511,20 @@ MULTI PARALLELISM OPENMP
 */
 int copyaa(Hyperarc* a, Hyperarc* b, int w){
 	int i;
-	#pragma omp parallel for private(i) shared(a,b) num_threads(1)
+	
+	#pragma omp parallel for private(i) shared(a,b) num_threads(nThr)
 	for(i=0; i<w; i++){
 		a[i] = b[i];
 	}
+	
+	
+	//std::copy(std::execution::par,b,b+w,a);
+	std::sort(a, a + w, compareTwoHyerarch);
+	std::unique( a, a + w , ne_compareTwoHyerarch);
 	return 0;
 }
+
+
 
 /*   ## CPU ##
 Prepare the data and lunch BFS
@@ -522,17 +549,43 @@ Allocate (num_start)* int array CPU (split between threads)
 void gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_edges, int * Start, int num_start){
 	Hyperarc ** nArch, * newEdges;
 	int nNew_Arch=0, *sizeTot;
+	int * from;
 	
 	
-	#pragma omp parallel shared(Vertices, Edges, Start, num_vertices, num_edges, num_start, nNew_Arch, sizeTot, newEdges) private(nArch) 
+
+	gpuErrchk(cudaMalloc((void**)&Vertices_DEV, sizeof(int)*num_vertices));
+	gpuErrchk(cudaMalloc((void**)&Edges_DEV, sizeof(Hyperarc)*num_edges));
+	
+	cudaMemcpy(Vertices_DEV, Vertices, sizeof(int)*num_vertices, cudaMemcpyHostToDevice);
+	int len_frT = 0;
+	for(int i=0; i<num_edges; i++){	
+		len_frT = (*Edges)[i].len_fr;
+		gpuErrchk(cudaMalloc((void**)&from, sizeof(int) * len_frT));
+		
+		cudaMemcpy(from, (*Edges)[i].from, sizeof(int)* len_frT, cudaMemcpyHostToDevice);
+		
+		
+		(*Edges)[i].from_dev = from;
+		
+	}
+	
+	cudaMemcpy(Edges_DEV, *Edges, sizeof(Hyperarc)*num_edges, cudaMemcpyHostToDevice);
+	
+	
+	
+	#pragma omp parallel num_threads(nThr) shared(Vertices, Edges, Start, num_vertices, num_edges, num_start, nNew_Arch, sizeTot, newEdges) private(nArch) 
 	{
 		if(omp_get_thread_num()==0) sizeTot = (int*) malloc(sizeof(int)*omp_get_num_threads());
 		
 		int workN = floor(num_start/(omp_get_num_threads()-1));
+		if(omp_get_thread_num()==0 && workN==0)
+			workN = num_vertices;
 		int ini = workN * omp_get_thread_num();
 		int end = fmin(workN * omp_get_thread_num() + workN, num_vertices);
 		int * mySyze = (int*)malloc(sizeof(int)*(end-ini));
 		int mySSyze=0;
+		
+	
 		
 		#ifdef DEBUG
 		printf("%d (%d,%d)\n",omp_get_thread_num(),ini,end);
@@ -600,6 +653,8 @@ void gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_edges
 		#pragma omp barrier
 	}
 	
+	gpuErrchk(cudaFree(Edges_DEV));
+	gpuErrchk(cudaFree(Vertices_DEV));
 	
 	#ifdef DEBUG
 	printf("copia finale\n");
@@ -617,8 +672,7 @@ void gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_edges
 	printf(" %s",*Edges==NULL? "error":"");
 	printf("%s\n",copyaa((*Edges),(newEdges), (num_edges))==0?"terminata":" error");
 	
-	std::sort(*Edges, *Edges + num_edges, compareTwoHyerarch);
-	std::unique( *Edges, *Edges + num_edges , ne_compareTwoHyerarch);
+	
 	
 }
 
@@ -627,7 +681,6 @@ void gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_edges
 main function
 read graph and initialize it, lunch gpu_bfs, write graphs
 (writing on console or file depends on the type of compilation)
-after reading press enter to start the program
 */
 /*
 Input:
@@ -636,17 +689,64 @@ Input:
 */
 int main(int argn, char ** args){
 	
+	
+	
+	
 	system("cls");
 	
 	int ** Vertices /*= (int*) malloc(sizeof(int)*8);*/ = (int**) malloc(sizeof(int*));
 	int num_vertices=0, num_edges=0;
-	
+	bool argg=false;
+	std::string file_name;
 	Hyperarc ** Edges  = (Hyperarc**) malloc(sizeof(Hyperarc*));
-
-	if(argn>1)
-		readGraph(args[1],Vertices,num_vertices, Edges, num_edges);
-	else
+	
+	if(argn>1){
+		for(int i=0; i<argn; i++)
+			if(std::string(args[i]).substr(0,4) == "-nT="){
+				nThr = std::stoi(std::string(args[i]).substr(4));
+				argg=true;
+			}
+			else 
+				file_name = args[i];
+		if(!argg){
+			#ifndef NTHR
+				#pragma omp parallel shared(nThr)
+				{
+					if(omp_get_thread_num()==0)
+						nThr = omp_get_max_threads();
+				}
+			#endif
+		}
+		#ifdef TIME
+		begin = std::chrono::high_resolution_clock::now();
+		#endif
+		readGraph(file_name,Vertices,num_vertices, Edges, num_edges);
+		
+		#ifdef TIME
+		end = std::chrono::high_resolution_clock::now();
+		#endif
+			
+	}else{
+		
+		#ifdef TIME
+		begin = std::chrono::high_resolution_clock::now();
+		#endif
 		readGraph("prova.txt",Vertices,num_vertices, Edges, num_edges);
+		
+		#ifdef TIME
+		end = std::chrono::high_resolution_clock::now();
+		#endif
+	}
+	
+	
+	
+	#ifdef TIME
+	durataRead = std::chrono::duration_cast<std::chrono::nanoseconds>( end - begin ).count();
+	#ifdef DEBUG
+	printf("reading time: %lu ns\n",durataRead);
+	printf("CPU threads: %d\nGPU Block:%d\nGPU threads: %d\n", nThr,MAX_BLOCKS,MAX_THREADS);
+	#endif
+	#endif
 	
 	#ifndef HIDE
 	for(int i=0; i<(num_edges); i++){
@@ -663,14 +763,28 @@ int main(int argn, char ** args){
 		printf("(VE %d)\n",(*Vertices)[i]);
 	#endif
 	
+	#ifndef NO_INPUT
 	printf("Press ENTER to start\n");
 	
 	getchar();
+	#endif
+	#ifdef TIME
+	begin = std::chrono::high_resolution_clock::now();
+	#endif
 	gpu_bfs(*Vertices, num_vertices, Edges, num_edges, *Vertices, num_vertices);
+
+	#ifdef TIME
+	end = std::chrono::high_resolution_clock::now();
+	durata = std::chrono::duration_cast<std::chrono::nanoseconds>( end - begin).count();
+	#endif
+	
 	
 	
 	#ifdef DEBUG
-	printf("END\n\n");
+	printf("END\n");
+	#ifdef TIME 
+	printf("::durata: %lu ns\n",durata);
+	#endif
 	#endif
 	#ifndef HIDE
 	
@@ -686,12 +800,16 @@ int main(int argn, char ** args){
 	
 	#ifdef FILE_OUT
 	if(argn>1){
-		std::string name_file(args[1]);
-		name_file = (name_file.substr(0,name_file.find(".", 2)) + ("_new.txt"));
-		writeGraph(*Vertices,num_vertices, *Edges, num_edges, name_file );
+		
+		file_name = (file_name.substr(0,file_name.find(".", 2)) + ("_new.txt"));
+		writeGraph(*Vertices,num_vertices, *Edges, num_edges, file_name );
 	}else
 		writeGraph(*Vertices,num_vertices, *Edges, num_edges,"prova_new.txt");
+	#ifdef TIME
+		writeTime(num_vertices,num_edges);
 	#endif
+	#endif
+	
 }
 	
 	

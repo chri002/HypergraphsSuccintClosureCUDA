@@ -21,7 +21,8 @@ int main(int argn, char ** argvs){
     int n = argn>1? std::stoi(argvs[1]): 25, m=0, n2=(argn>2? std::stoi(argvs[2]):n/2);
 	
 	std::ofstream myFile;
-	myFile.open("grafo.txt");
+	std::string name_file = "grafo_" + std::to_string(n) +"_"+ std::to_string(n2) +".txt";
+	myFile.open(name_file.c_str());
 	myFile << "INI " << n <<"," << n2 <<"\n";
 	
 	for(int i=0; i<fmax(n,n2); i++){
