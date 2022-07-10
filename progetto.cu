@@ -2,7 +2,7 @@
 #########################################################################################
 #																						#
 #	    	  			    hypergraph transitive closure 								#
-#  nvcc -rdc=true -lineinfo -std=c++17 -Xcompiler -openmp .\progetto.cu -o progetto.exe #
+# nvcc -rdc=true -lineinfo -std=c++17 -Xcompiler -openmp .\progetto.cu -o progetto.exe	#
 #			 			-D HIDE  : hide the output										#
 #			 			-D DEBUG : show information on runtime							#
 #			 			-D FILE_OUT : export graph to file								#
@@ -77,6 +77,10 @@ unsigned long durata,durataRead;
 
 #endif
 
+#ifdef DEBUG
+int lineStr=1;
+#endif
+
 
 //gestione e cattura errori GPU
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
@@ -121,7 +125,7 @@ bool ne_compareTwoHyerarch(Hyperarc a, Hyperarc b)
 	else return false;
 }
  
-//Hyperarch comparison function for the unique function (EqualLess
+//Hyperarch comparison function for the unique function (EqualLess)
 bool compareTwoHyerarch(Hyperarc a, Hyperarc b)
 {
 	if(a.to!=b.to)
@@ -148,9 +152,11 @@ Input:
 	num_vertices : number of integers pointed from *Vertices
 	Edges : pointer of pointer of Hyperarcs
 	num_edges : number of hyperarcs pointed from *Edges
+	initial : pointer of pointer of Hypervector (set of Superset)
+	num_initial : number of hypervector pointer from *initial
 !!!!!!!
 MODIFY:
-	**Vertices, **Edges, num_edges, num_vertices
+	**Vertices, **Edges, **initial, num_edges, num_vertices, num_initial
 */
 void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& Edges,int &num_edges, Hypervector**& initial, int &num_initial){
 	std::ifstream file_graph;
@@ -174,6 +180,7 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 				*Edges = (Hyperarc*) malloc(sizeof(Hyperarc)*num_edges);
 				
 				printf("OK\n");
+				lineStr++;
 			}else if(pref == "(HA"){
 				temp = line.find("}");
 				temp2 = line.find("{");
@@ -224,6 +231,7 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 			
 		file_graph.close();
 		printf("Superset: %d ok\n",num_initial);
+		lineStr++;
 	}
 	
 }
@@ -243,8 +251,10 @@ void writeGraph(int* Vertices, int num_vertices, Hyperarc* Edges, int num_edges,
 	std::ofstream myFile;
 	myFile.open(FILE);
 	myFile << "INI " << num_vertices <<"," << num_edges <<"\n";
-	for(int i=0; i<num_vertices; i++)
+	lineStr++;
+	for(int i=0; i<num_vertices; i++){
 		myFile << "(VE " << i <<")\n";
+	}
 	for(int i=0; i<(num_edges); i++){
 		myFile << "(HA {";
 		for(int j=0; j<(Edges)[i].len_fr; j++){
@@ -252,7 +262,6 @@ void writeGraph(int* Vertices, int num_vertices, Hyperarc* Edges, int num_edges,
 			if(j!=((Edges)[i].len_fr)-1) myFile << ",";
 		}
 		myFile << "}," << (Edges)[i].len_fr<<","<<(Edges)[i].to <<")\n";
-			
 	}
 	
 	
@@ -275,7 +284,17 @@ void writeTime(int num_vertices, int num_edges){
 	myFile.close();
 }
 
-
+/*	## GPU ##
+Confront hyperarcs superset with node's array  
+*/
+/*
+Input:
+	hyperarcs : array of node inside hyperarcs
+	vectors : array of nodes
+	minLen : min(len(hyperarcs),len(vectors))
+Output:
+	if array is equal
+*/
 __device__ bool equalHyperVector(int * hyperarcs, int * vectors, int minLen){
 	bool ok=true;
 	for(int i=0; i<minLen && ok; i++){
@@ -298,9 +317,10 @@ Input:
 	Visited : tracks the visited nodes during BFS
 	Cost : the distance between start node and the other node
 	thidLast : the node from to which to search for hyperarcs
+	first : first time flags 
 !!!!!!
 MODIFY:
-	Cost, Visited
+	Cost, FrontierUpdate
 */
 __global__ void neighOp(int *Vertices, int num_vertices, Hyperarc * Edges, int num_edges, bool* FrontierUpdate, bool* Visited, int* Cost, int* thidLast, int len, int first){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -356,6 +376,8 @@ Input:
 	FrontierUpdate : tracks changes during BFS step
 	Visited : tracks the visited nodes during BFS
 	Cost : the distance between start node and the other node
+	first : array of starting node (superset)
+	len : lenght of first (-1 for all step without the first)
 !!!!!!
 MODIFY:
 	Frontier, Cost, Visited
@@ -612,7 +634,7 @@ int copyaa(Hyperarc* a, Hyperarc* b, int w){
 	std::copy(std::execution::par,b,b+w,a);
 	
 	std::sort(a, a + w, compareTwoHyerarch);
-	std::unique( a, a + w , ne_compareTwoHyerarch);
+	auto discard=std::unique( a, a + w , ne_compareTwoHyerarch);
 	return 0;
 }
 
@@ -627,21 +649,22 @@ Input:
 	num_vertices : number of integers pointed from Vertices
 	Edges : pointer of pointer of Hyperarcs
 	num_edges : number of hyperarcs pointed from Edges
-	Start : pointer of Integers (the vertices from which to start the BFS)
-	num_start : number of integers pointed from Start
+	Start : pointer of hypervector (the vertices from which to start the BFS)
+	num_start : number of hypervector pointed from Start
 !!!!!!
 MODIFY:
 	Edges
 !!!!!!
 MULTI PARALLELISM OPENMP
 !!!!!!
-Allocate (num_start)* int array CPU (split between threads)
+Allocate temporary (num_start) int array CPU (split between threads)
 
 */
 Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_edges, Hypervector * Start, int num_start){
 	Hyperarc ** nArch, * newEdges;
 	int nNew_Arch=0, *sizeTot, totOp=0;
 	int * from;
+	std::string complete="";
 	
 	
 
@@ -666,7 +689,7 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 	cudaMemcpy(Edges_DEV, *Edges, sizeof(Hyperarc)*num_edges, cudaMemcpyHostToDevice);
 	
 	
-	#pragma omp parallel num_threads(nThr) shared(Vertices, Edges, Start, num_vertices, num_edges, num_start, nNew_Arch, sizeTot, newEdges) private(nArch) 
+	#pragma omp parallel num_threads(nThr) shared(complete, Vertices, Edges, Start, num_vertices, num_edges, num_start, nNew_Arch, sizeTot, newEdges) private(nArch) 
 	{
 		if(omp_get_thread_num()==0) sizeTot = (int*) malloc(sizeof(int)*omp_get_num_threads());
 		
@@ -680,6 +703,8 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 		
 		#ifdef DEBUG
 		printf("%d (%d,%d)\n",omp_get_thread_num(),ini,end);
+		#pragma omp atomic
+		lineStr++;
 		#pragma omp barrier
 		#endif
 		
@@ -693,7 +718,7 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 			#ifdef DEBUG
 			#pragma omp atomic
 			totOp+=1;
-			printf("Completato %d/%d\n",totOp,num_start);
+			printf("\033[%d;1HCompletato %d/%d \t(%s )",lineStr,totOp,num_start,complete.c_str());
 			#endif
 			for(int j=0; j<num_vertices && (nArch[i-ini][j].to!=-1); j++){
 				#pragma omp atomic
@@ -704,7 +729,7 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 			}
 		}
 		#ifdef DEBUG
-		printf("%d ",omp_get_thread_num());
+		complete+=" "+std::to_string(omp_get_thread_num());
 		#endif
 		
 		sizeTot[omp_get_thread_num()] = mySSyze;
@@ -714,6 +739,8 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 			newEdges = (Hyperarc*) malloc(sizeof(Hyperarc)*(nNew_Arch+num_edges));
 			#ifdef DEBUG
 			printf("\n");
+			#pragma omp atomic
+			lineStr++;
 			#endif
 		}
 		
@@ -725,6 +752,8 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 		
 		#ifdef DEBUG
 		printf("%d: ini %d-%d (%d)\n", omp_get_thread_num(), ini, ini+mySSyze, (nNew_Arch+num_edges));
+		#pragma omp atomic
+		lineStr++;
 		#endif
 		
 		ida=ini; 
@@ -747,6 +776,7 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 		}
 		#ifdef DEBUG
 		printf("finito %d (%d)\n",omp_get_thread_num(), (ida));
+		lineStr++;
 		#endif
 		#pragma omp barrier
 	}
@@ -757,6 +787,7 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 	
 	#ifdef DEBUG
 	printf("copia finale\n");
+	lineStr++;
 	#endif
 	/*
 	for(int i=0; i<num_edges; i++)
@@ -774,7 +805,9 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 	(*Edges) = newEdges;
 	printf(" %s",*Edges==NULL? "error":"");
 	printf("%s\n",copyaa((*Edges),(newEdges), (num_edges))==0?"terminata":" error");
-	
+	#ifdef DEBUG
+	lineStr++;
+	#endif
 	
 	return *Edges;
 	
@@ -789,7 +822,7 @@ read graph and initialize it, lunch gpu_bfs, write graphs
 */
 /*
 Input:
-	args = { name_program, [name_graphs] }
+	args = { name_program, [name_graphs, -nT=<numberOfOmpThreads>] }
 
 */
 int main(int argn, char ** args){
@@ -849,15 +882,20 @@ int main(int argn, char ** args){
 	
 	
 	#ifdef TIME
-	durataRead = std::chrono::duration_cast<std::chrono::nanoseconds>( end - begin ).count();
+	durataRead = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin ).count();
 	#ifdef DEBUG
-	printf("reading time: %lu ns\n",durataRead);
+	printf("reading time: %lu ms\n",durataRead);
+	lineStr++;
 	printf("CPU threads: %d\nGPU Block:%d\nGPU threads: %d\n", nThr,MAX_BLOCKS,MAX_THREADS);
+	lineStr+=3;
 	#endif
 	#endif
 	
 	#ifndef HIDE
 	printf("Hyperarc: %d\n",num_edges);
+	#ifdef DEBUG
+	lineStr++;
+	#endif
 	for(int i=0; i<(num_edges); i++){
 		printf("(HA {");
 		for(int j=0; j<(*Edges)[i].len_fr; j++){
@@ -865,15 +903,27 @@ int main(int argn, char ** args){
 			if(j!=((*Edges)[i].len_fr)-1) printf(",");
 		}
 		printf("} %d)\n",(*Edges)[i].to);
-			
+		#ifdef DEBUG
+		lineStr++;
+		#endif
 	}
 	
 	printf("Vertices: %d\n",num_vertices);
-	for(int i=0; i<num_vertices; i++)
+	#ifdef DEBUG
+	lineStr++;
+	#endif
+	for(int i=0; i<num_vertices; i++){
 		printf("(VE %d)\n",(*Vertices)[i]);
+		#ifdef DEBUG
+		lineStr++;
+		#endif
+	}
 	
 	
 	printf("Hypervector: %d\n",num_initial);
+	#ifdef DEBUG
+	lineStr++;
+	#endif
 	for(int i=0; i<(num_initial); i++){
 		printf("(HV {");
 		for(int j=0; j<(*initial)[i].len; j++){
@@ -881,7 +931,9 @@ int main(int argn, char ** args){
 			if(j!=((*initial)[i].len)-1) printf(",");
 		}
 		printf("}, %d)\n",(*initial)[i].len);
-			
+		#ifdef DEBUG
+		lineStr++;
+		#endif
 	}
 	#endif
 	
@@ -889,6 +941,9 @@ int main(int argn, char ** args){
 	printf("Press ENTER to start\n");
 	
 	getchar();
+	#ifdef DEBUG
+	lineStr+=2;
+	#endif
 	#endif
 	#ifdef TIME
 	begin = std::chrono::high_resolution_clock::now();
@@ -897,15 +952,21 @@ int main(int argn, char ** args){
 
 	#ifdef TIME
 	end = std::chrono::high_resolution_clock::now();
-	durata = std::chrono::duration_cast<std::chrono::nanoseconds>( end - begin).count();
+	durata = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin).count();
 	#endif
 	
 	
 	
 	#ifdef DEBUG
 	printf("END\n");
+	#ifdef DEBUG
+	lineStr++;
+	#endif
 	#ifdef TIME 
-	printf("::durata: %lu ns\n",durata);
+	printf("::durata: %lu ms\n",durata);
+	#ifdef DEBUG
+	lineStr++;
+	#endif
 	#endif
 	#endif
 	#ifndef HIDE
@@ -917,6 +978,9 @@ int main(int argn, char ** args){
 			if(j!=((*Edges)[i].len_fr)-1) printf(",");
 		}
 		printf("},%d,%d)\n",(*Edges)[i].len_fr,(*Edges)[i].to);
+		#ifdef DEBUG
+		lineStr++;
+		#endif
 	}
 	#endif
 	
