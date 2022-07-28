@@ -26,10 +26,8 @@ Calculation of the succinct transitive closure given a hypergraph H, in a parall
 	CPU parallelism: BFS is invoked for each vertex of the hypergraph; merge of vectors
 		obtained from the BFS.
 	GPU parallelism: the BFS to find all the grandchildren of the node.
-
 Compile example:
 	nvcc -rdc=true -D FILE_OUT -D DEBUG -D HIDE -D MAX_THREADS=1024 -D MAX_BLOCKS=4 -D TIME -std=c++17 -lineinfo -Xcompiler -openmp -Xlinker /HEAP:0x8096 .\progetto.cu  -o progetto.exe
-
 Work:
 	progetto.exe "grafo.txt"
 	
@@ -180,7 +178,9 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 				*Edges = (Hyperarc*) malloc(sizeof(Hyperarc)*num_edges);
 				
 				printf("OK\n");
+				#ifdef DEBUG
 				lineStr++;
+				#endif
 			}else if(pref == "(HA"){
 				temp = line.find("}");
 				temp2 = line.find("{");
@@ -231,7 +231,9 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 			
 		file_graph.close();
 		printf("Superset: %d ok\n",num_initial);
+		#ifdef DEBUG
 		lineStr++;
+		#endif
 	}
 	
 }
@@ -251,7 +253,9 @@ void writeGraph(int* Vertices, int num_vertices, Hyperarc* Edges, int num_edges,
 	std::ofstream myFile;
 	myFile.open(FILE);
 	myFile << "INI " << num_vertices <<"," << num_edges <<"\n";
+	#ifdef DEBUG
 	lineStr++;
+	#endif
 	for(int i=0; i<num_vertices; i++){
 		myFile << "(VE " << i <<")\n";
 	}
@@ -323,14 +327,14 @@ MODIFY:
 	Cost, FrontierUpdate
 */
 __global__ void neighOp(int *Vertices, int num_vertices, Hyperarc * Edges, int num_edges, bool* FrontierUpdate, bool* Visited, int* Cost, int* thidLast, int len, int first){
-	int thid = blockIdx.x * blockDim.x + threadIdx.x;
+	int thid = threadIdx.x;
 	bool thereIs = false;
 	int thidI;
 	
 	
 		
 	for(int Pass=0; Pass<ceilf((num_edges/(blockDim.x)))+1; Pass++){
-		thidI = thid + Pass*blockDim.x;
+		thidI = thid + Pass*(blockDim.x);
 	
 		if(thidI<num_edges){
 			for(int i=0; i<num_vertices; i++){
@@ -398,8 +402,7 @@ __global__ void bfs(int *Vertices, int num_vertices, Hyperarc * Edges,const int 
 				if(Frontier[thidI]){
 					if(len==-1){
 						Frontier[thidI] = false;
-						first[0]=thidI;
-						neighOp<<< 1, MAX_THREADS>>>(Vertices, num_vertices,  Edges, num_edges, FrontierUpdate, Visited, Cost, first,1, 0);
+						neighOp<<< 1, MAX_THREADS>>>(Vertices, num_vertices,  Edges, num_edges, FrontierUpdate, Visited, Cost, new int{thidI},1, 0);
 					}else{
 						if(thidI==first[0]){
 							for(int i=0; i<len; i++){
@@ -481,7 +484,6 @@ Allocate num_vertices*2 int  array GPU
 Allocate num_edges Hyperarc  array GPU
 Allocate new Edges array that contains the succint closure hyperarcs
 Allocate Temporary Array to copy to GPU the set of node of the hyperarcs
-
 */
 Hyperarc * Edges_DEV;
 int * Vertices_DEV;
@@ -574,7 +576,6 @@ Hyperarc * graph_bfs_nieces(int * Vertices, int num_vertices, Hyperarc * Edges, 
 	}
 	
 	
-	
 	newEdges = (Hyperarc*) malloc(sizeof(Hyperarc)*(sizeEdges+1));
 	int k=0;
 	for(int i=0; i<num_vertices && k<sizeEdges; i++){
@@ -658,11 +659,13 @@ MODIFY:
 MULTI PARALLELISM OPENMP
 !!!!!!
 Allocate temporary (num_start) int array CPU (split between threads)
-
 */
 Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_edges, Hypervector * Start, int num_start){
 	Hyperarc ** nArch, * newEdges;
-	int nNew_Arch=0, *sizeTot, totOp=0;
+	int nNew_Arch=0, *sizeTot;
+	#ifdef DEBUG
+	int totOp=0;
+	#endif
 	int * from;
 	std::string complete="";
 	
@@ -823,7 +826,6 @@ read graph and initialize it, lunch gpu_bfs, write graphs
 /*
 Input:
 	args = { name_program, [name_graphs, -nT=<numberOfOmpThreads>] }
-
 */
 int main(int argn, char ** args){
 	
@@ -999,5 +1001,3 @@ int main(int argn, char ** args){
 	#endif
 	
 }
-	
-	
