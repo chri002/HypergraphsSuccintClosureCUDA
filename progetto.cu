@@ -106,6 +106,8 @@ typedef struct{
 	int len;
 } Hypervector;
 
+typedef std::pair<int, int> pair;
+
 
 
 //Hyperarch comparison function for the unique function (NotEqual)
@@ -126,8 +128,7 @@ bool ne_compareTwoHyerarch(Hyperarc a, Hyperarc b)
 //Hyperarch comparison function for the unique function (EqualLess)
 bool compareTwoHyerarch(Hyperarc a, Hyperarc b)
 {
-	if(a.to!=b.to)
-	return a.to < b.to;
+	
 	bool ok=true;
 	int i,j=0;
 	for(i=0; i<min(a.len_fr,b.len_fr) && ok; i++) {
@@ -135,8 +136,8 @@ bool compareTwoHyerarch(Hyperarc a, Hyperarc b)
 		j=i;
 	}
 	
-	if(ok) return (a.len_fr<=b.len_fr);
-	else return a.from[j]<b.from[j];
+	if(ok) return (a.len_fr<b.len_fr);
+	else if(a.len_fr==b.len_fr) return a.to < b.to; else return a.from[j]<b.from[j];
 }
 
 
@@ -160,7 +161,7 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 	std::ifstream file_graph;
 	std::string line, pref, from;
 	int idxE = 0, idxV = 0, len_fr, to, temp, temp1,temp2;
-	std::map<std::string, int> temporaneo;
+	std::map<std::string, pair> temporaneo;
 	
 	file_graph.open(FILE, std::ios::in);
 	if (file_graph.is_open())
@@ -192,17 +193,25 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 				to = std::stoi(line.substr(temp2+1, line.find(")")-(temp2+1)));
 				(*Edges)[idxE] = {(int*)malloc(sizeof(int)*len_fr), NULL, len_fr, to};
 				temp = 0;
-				for(int i=0; i<len_fr; i++){
-					temp1 = from.find(",", temp);
-					if(temp==-1)
-						(*Edges)[idxE].from[i] = std::stoi(from.substr(temp));
-					else
-						(*Edges)[idxE].from[i] = std::stoi(from.substr(temp,temp1));
-					temp=temp1+1;
+				if(temporaneo.find(from)==temporaneo.end()){
+					auto pa = std::make_pair(len_fr,idxE);
+					temporaneo.insert(make_pair(from,pa));
+					
+				
+					for(int i=0; i<len_fr; i++){
+						temp1 = from.find(",", temp);
+						if(temp==-1)
+							(*Edges)[idxE].from[i] = std::stoi(from.substr(temp));
+						else
+							(*Edges)[idxE].from[i] = std::stoi(from.substr(temp,temp1));
+						temp=temp1+1;
+						
+					}
+				}else{
+					auto it = temporaneo.find(from)->second;
+					(*Edges)[idxE].from = (*Edges)[(it.second)].from;
 					
 				}
-				if(temporaneo.find(from)==temporaneo.end())
-					temporaneo.insert(make_pair(from,len_fr));
 				idxE++;
 			}else if(pref == "(VE"){
 				(*Vertices)[idxV] = std::stoi(line.substr(3, line.find(")")-1));
@@ -211,20 +220,14 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 		}
 		num_initial = temporaneo.size();
 		*initial = (Hypervector*) malloc(sizeof(Hypervector)*num_initial);
-		int itera=0,tt;
+		int itera=0;
+		pair tt;
 		
 		
 		for(auto it=temporaneo.begin(); it!=temporaneo.end(); it++){
-			temp=0; temp1=0;
+			
 			tt = it->second;
-			(*initial)[itera] = {(int*)malloc(sizeof(int)*tt),tt};
-			line = it->first;
-			for(int j=0; j<tt; j++){
-				temp1=line.find(",", temp);
-				(*initial)[itera].vectors[j] =  std::stoi(line.substr(temp,temp1-temp));
-				
-				temp = temp1+1;
-			}
+			(*initial)[itera] = {(*Edges)[tt.second].from,tt.first};
 			
 			itera++;
 		}
@@ -748,35 +751,36 @@ Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_
 		}
 		
 		#pragma omp barrier
-		int idx=0,ida,len=end-ini;
+		int idx=0,ida,len=end-ini,ivi;
 		
-		ini=0;
-		for(int i=0; i<omp_get_thread_num(); i++) ini+=sizeTot[i];
+		ivi=0;
+		for(int i=0; i<omp_get_thread_num(); i++) ivi+=sizeTot[i];
 		
 		#ifdef DEBUG
-		printf("%d: ini %d-%d (%d)\n", omp_get_thread_num(), ini, ini+mySSyze, (nNew_Arch+num_edges));
+		printf("%d: ini %d-%d (%d)\n", omp_get_thread_num(), ini, ivi+mySSyze, (nNew_Arch+num_edges));
 		#pragma omp atomic
 		lineStr++;
 		#endif
 		
-		ida=ini; 
+		ida=ivi; 
 		
-		while(ida<ini+mySSyze){
+		while(ida<ivi+mySSyze){
 			for(int j=0;j<len; j++){
-				#pragma omp critical
-				{
-					if(idx<mySyze[j]){
-						newEdges[ida] = nArch[j][idx];
-						ida++;
-						
+				if(idx<mySyze[j]){
+					newEdges[ida] = nArch[j][idx];
+					ida++;
 					
-					}
+				
 				}
+				
 				
 			}
 			idx++;
 			
 		}
+		
+		
+		
 		#ifdef DEBUG
 		printf("finito %d (%d)\n",omp_get_thread_num(), (ida));
 		lineStr++;
