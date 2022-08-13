@@ -600,11 +600,6 @@ __device__ bool includes(int x, int * arr, int len){
 	return ok;
 }
 
-__device__ int maxDL(int* v, int *v1, int l, int l1){
-	int r=v[0];
-	for(int i=0; i<l1 && v1[i]<l; i++) if(r<v[(v1[i])]) r=v[v1[i]];
-	return r;
-}
 /*   ## GPU ##
 Find neighbors during one BFS step
 */
@@ -623,41 +618,40 @@ Input:
 MODIFY:
 	Cost, FrontierUpdate
 */
-__global__  void neighOp_M(bool ** adjMatrix, int idSource, int num_vertices,bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, int num_source){
+__global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, int num_source){
 	int thid = threadIdx.x;
 	int thidI;
+	int so, ve;
 			
-	for(int Pass=0; Pass<ceilf((num_vertices/(blockDim.x)))+1; Pass++){
+	for(int Pass=0; Pass<ceilf((num_source*num_vertices/(blockDim.x)))+1; Pass++){
 		thidI = thid + Pass*(blockDim.x);
 		
-		if(thidI<num_vertices){
-			if(adjMatrix[idSource][thidI]){
-				
-				for(int i=0; i<num_source; i++){
-					if(includes(thidI,Sources[i].vectors, Sources[i].len) && Visited[i]==false){
-						Cost[thidI] = maxDL(Cost,Sources[idSource].vectors, num_vertices, Sources[idSource].len)+1;
-						FrontierUpdate[i] = true;
-					}
-				}
-			}
-			
+		if(thidI<num_source*num_vertices){
+			so = thidI/num_vertices;
+			ve = thidI%num_vertices;
+			if(includes(idVert, Sources[so].vectors, Sources[so].len)) 
+				if(adjMatrix[so][ve] && Visited[ve]==false){
+						Cost[ve] = Cost[idVert]+1;
+						FrontierUpdate[ve] = true;
+					}		
+		
 		}
 	}
 	__syncthreads();
 	
 }
 
-__global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources){
+__global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, int idSource){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI;
-	
+	int t_source = idSource;
 		
 	__syncthreads();
 	
-	for(int Pass=0; Pass<ceilf(num_source/(gridDim.x*blockDim.x))+1; Pass++){
+	for(int Pass=0; Pass<ceilf(num_vertices/(gridDim.x*blockDim.x))+1; Pass++){
 		thidI = thid + Pass*(gridDim.x*blockDim.x);
 	
-		if(thidI < num_source)
+		if(thidI < num_vertices)
 			if(Frontier[thidI]){
 				Frontier[thidI]=false;
 				Visited[thidI]=true;
@@ -683,14 +677,14 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 	Cost_HOS = (int*) malloc(sizeof(int)*num_vertices);
 	gpuErrchk(cudaMalloc((void**)&Cost_DEV, sizeof(int)*num_vertices));
 	
-	Frontier_HOS = (bool*) malloc(sizeof(bool)*num_source);
-	gpuErrchk(cudaMalloc((void**)&Frontier_DEV, sizeof(bool)*num_source));
+	Frontier_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
+	gpuErrchk(cudaMalloc((void**)&Frontier_DEV, sizeof(bool)*num_vertices));
 	
-	FrontierUpdate_HOS = (bool*) malloc(sizeof(bool)*num_source);
-	gpuErrchk(cudaMalloc((void**)&FrontierUpdate_DEV, sizeof(bool)*num_source));
+	FrontierUpdate_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
+	gpuErrchk(cudaMalloc((void**)&FrontierUpdate_DEV, sizeof(bool)*num_vertices));
 	
-	Visited_HOS = (bool*) malloc(sizeof(bool)*num_source);
-	gpuErrchk(cudaMalloc((void**)&Visited_DEV, sizeof(bool)*num_source));
+	Visited_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
+	gpuErrchk(cudaMalloc((void**)&Visited_DEV, sizeof(bool)*num_vertices));
 	
 	next_HOS = 1;
 	gpuErrchk(cudaMalloc((void**) &next_DEV, sizeof(int)));	
@@ -704,7 +698,7 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 		Cost_HOS[i] = -1;
 	}
 	
-	for(int i=0; i<num_source; i++){
+	for(int i=0; i<num_vertices; i++){
 		Frontier_HOS[i] = false;
 		FrontierUpdate_HOS[i] = false;
 		Visited_HOS[i] = false;
@@ -712,26 +706,19 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 	
 	
 	
-	Frontier_HOS[sourceStart] 	= true;
-	Visited_HOS[sourceStart] 		= true;
 	for(int i=0; i<Set[sourceStart].len; i++){
 		Cost_HOS[Set[sourceStart].vectors[i]] 		= 0;
-		for(int j=0; j<num_source; j++)
-			for(int k=0; k<Set[j].len; k++)
-				if(Set[sourceStart].vectors[i]==Set[j].vectors[k]){
-					
-					Frontier_HOS[j] = true;
-					FrontierUpdate_HOS[j] = true;
-					Visited_HOS[j] = true;
-				}
+		Frontier_HOS[Set[sourceStart].vectors[i]] 	= true;
+		Visited_HOS[Set[sourceStart].vectors[i]] 		= true;
+		
 					
 	}
 	
 	
 	cudaMemcpy(Cost_DEV, Cost_HOS, sizeof(int)*num_vertices, cudaMemcpyHostToDevice);
-	cudaMemcpy(Frontier_DEV, Frontier_HOS, sizeof(bool)*num_source, cudaMemcpyHostToDevice);
-	cudaMemcpy(FrontierUpdate_DEV, FrontierUpdate_HOS, sizeof(bool)*num_source, cudaMemcpyHostToDevice);
-	cudaMemcpy(Visited_DEV, Visited_HOS, sizeof(bool)*num_source, cudaMemcpyHostToDevice);
+	cudaMemcpy(Frontier_DEV, Frontier_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
+	cudaMemcpy(FrontierUpdate_DEV, FrontierUpdate_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
+	cudaMemcpy(Visited_DEV, Visited_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
 	gpuErrchk(cudaGetLastError());
 		
 		
@@ -739,11 +726,11 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 		next_HOS = 0;
 		gpuErrchk(cudaMemcpy(next_DEV, &next_HOS, sizeof(int), cudaMemcpyHostToDevice));
 		
-		bfs_M<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(adjMatrix_DEV, num_vertices, num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV);
+		bfs_M<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(adjMatrix_DEV, num_vertices, num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV, sourceStart);
 		cudaDeviceSynchronize();
 		gpuErrchk(cudaGetLastError());
 		
-		bfs_update<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, next_DEV);
+		bfs_update<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(num_vertices, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, next_DEV);
 		cudaDeviceSynchronize();
 		gpuErrchk(cudaGetLastError());
 		
@@ -802,7 +789,7 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	
 	Hypervector * set_DEV, * set_HOS;
 	
-	int len_frT, sum=0, totOp=0;
+	int len_frT, sum=0, totOp=0, totSo=0;
 	
 	std::string completo = "";
 	
@@ -843,7 +830,7 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	lineStr+=1;
 	#endif
 	
-	#pragma omp parallel shared(adjMatrix_DEV, adjMatrix, set_DEV,Set, from, num_vertices, num_source, completo, totOp) private(fromb) num_threads(nThr)
+	#pragma omp parallel shared(adjMatrix_DEV, adjMatrix, set_DEV,Set, from, num_vertices, num_source, completo, totOp, totSo) private(fromb) num_threads(nThr)
 	{
 		int work_x_thr  = ceil(num_source/(nThr));
 		int sx 		    = omp_get_thread_num() * work_x_thr;
@@ -875,10 +862,13 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 				from[omp_get_thread_num()] += t_num_edges;
 				
 				free(fromb);
-				#ifdef DEBUG
-				printf("\033[%d;0HCompletato %d/%d  (%s )            ",lineStr,totOp,omp_get_max_threads(),completo.c_str());
-				#endif
+				
 			}
+			#ifdef DEBUG
+			#pragma omp atomic
+			totSo+=1;
+			printf("\033[%d;0HCompletato %d/%d  (%s ) [%d/%d]           ",lineStr,totOp,omp_get_max_threads(),completo.c_str(),totSo,num_source);
+			#endif
 			
 		}
 		
@@ -886,7 +876,7 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		completo+=" "+std::to_string(omp_get_thread_num());
 		#pragma omp atomic
 		totOp+=1;
-		printf("\033[%d;1HCompletato %d/%d  (%s )",lineStr,totOp,omp_get_max_threads(),completo.c_str());
+		printf("\033[%d;1HCompletato %d/%d  (%s ) [%d/%d]           ",lineStr,totOp,omp_get_max_threads(),completo.c_str(),totSo,num_source);
 		#endif
 	}
 	
@@ -902,7 +892,16 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	for (int i=0;i<nThr;i++)
 	  sum=sum+from[i];
   
-  
+	for(int i=0; i<num_source; i++){
+		if(Set[i].real){
+			for(int j=0; j<num_vertices; j++){
+				//printf("(%d ",adjMatrix[i][j]);
+				adjMatrix[i][j] = adjMatrix[i][j] || MatrixAdj[i][j];
+				//printf("%d) ",adjMatrix[i][j]);
+			}
+			//printf("\n");
+		}
+	}
 	
 	num_edges = sum;
 	
