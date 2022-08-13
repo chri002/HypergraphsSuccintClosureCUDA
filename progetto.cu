@@ -95,20 +95,29 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 //Struttura iperarco
 
 typedef struct{
-	int* from;					//Insieme nodi provenienza CPU
-	int* from_dev;				//Insieme nodi provenienza GPU
+	int* from;					//Insieme nodi CPU
+	int* from_dev;				//Insieme nodi GPU
 	int len_fr;					//lunghezza dei vettori precedenti
 	int to;						//Nodo di arrivo dell'iperarco
 } Hyperarc;
 
+//Struttura sorgente
+
 typedef struct{
 	int* vectors;
 	int len;
+	bool real;
 } Hypervector;
+
+
+//definizione di coppia di int
 
 typedef std::pair<int, int> pair;
 
 
+
+int copyaa(Hyperarc* a, Hyperarc* b, int w);
+int copyaa(Hypervector* a, Hypervector* b, int w);
 
 //Hyperarch comparison function for the unique function (NotEqual)
 bool ne_compareTwoHyerarch(Hyperarc a, Hyperarc b)
@@ -160,8 +169,10 @@ MODIFY:
 void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& Edges,int &num_edges, Hypervector**& initial, int &num_initial){
 	std::ifstream file_graph;
 	std::string line, pref, from;
-	int idxE = 0, idxV = 0, len_fr, to, temp, temp1,temp2;
+	int idxE = 0, idxV = 0, len_fr, to, temp, temp1,temp2, idxEe=0;
 	std::map<std::string, pair> temporaneo;
+	bool succinto = false;
+	int num_real_source;
 	
 	file_graph.open(FILE, std::ios::in);
 	if (file_graph.is_open())
@@ -182,6 +193,77 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 				#ifdef DEBUG
 				lineStr++;
 				#endif
+			}else if(pref == "SUC"){
+				temp  = line.find(",")+1;
+				temp1 = line.find(",",temp+1);
+				temp2 = line.find(",",temp1+1);
+								
+				num_vertices 	= std::stoi(line.substr(3, (int)line.find(",")-3));
+				num_edges    	= std::stoi(line.substr(temp1+1, temp2-temp1));
+				num_initial  	= std::stoi(line.substr(temp2+1));
+				num_real_source = std::stoi(line.substr(temp, temp1-temp));
+				printf("Vertici %d, Edges %d, Sources %d (%d)", num_vertices, num_edges, num_real_source, num_initial);
+				
+				*Vertices = (int*) malloc(sizeof(int)*num_vertices);
+				*initial = (Hypervector*) malloc(sizeof(Hypervector)*num_real_source);
+				*Edges = (Hyperarc*) malloc(sizeof(Hyperarc)*num_edges);
+				
+				
+				printf("OK\n");
+				#ifdef DEBUG
+				lineStr++;
+				#endif
+			}else if(pref == "MAT"){
+				succinto = true;	
+			}else if(pref == "(SE"){
+				temp = line.find("}");
+				temp2 = line.find("{");
+				from = (line.substr(temp2+1, temp-(temp2+1)));
+				temp1 = line.find(",",temp+1);
+				len_fr = std::stoi(line.substr(temp1+1, temp));
+				
+				(*initial)[idxE] = {(int*)malloc(sizeof(int)*len_fr), len_fr, true};
+				temp = 0;
+				
+				
+				auto pa = std::make_pair(len_fr,idxE);
+				temporaneo.insert(make_pair(from,pa));
+				
+			
+				for(int i=0; i<len_fr; i++){
+					temp1 = from.find(",", temp);
+					if(temp==-1)
+						(*initial)[idxE].vectors[i] = std::stoi(from.substr(temp));
+					else
+						(*initial)[idxE].vectors[i] = std::stoi(from.substr(temp,temp1));
+					temp=temp1+1;
+					
+				}
+				
+				for(int i=0; i<len_fr; i++)
+					printf("%d ",(*initial)[idxE].vectors[i]);
+				printf(", %d\n",(*initial)[idxE].real?1:0);
+				
+				idxE++;
+				
+			}else if(pref == "RGS" && succinto){
+				temp  = 4;
+				temp1 = line.find(",",temp);
+				temp2 = 0;
+				while(line.substr(temp)!="REG"){
+					printf("%s ",line.substr(temp).c_str());
+					if(line.substr(temp,1)=="1"){
+						(*Edges)[idxV] = {(*initial)[idxEe].vectors,NULL, (*initial)[idxEe].len, temp2};
+						idxV++;
+					}
+					temp2++;
+					
+					temp = line.find(",",temp+1)+1;
+					printf("%d\n",temp);
+					if(temp == 0) temp = line.find(" ",temp+4)+1;
+				}
+				printf(" %d\n",idxV);
+				idxEe++;
 			}else if(pref == "(HA"){
 				temp = line.find("}");
 				temp2 = line.find("{");
@@ -218,25 +300,73 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 				idxV ++;
 			}
 		}
-		num_initial = temporaneo.size();
-		*initial = (Hypervector*) malloc(sizeof(Hypervector)*num_initial);
-		int itera=0;
+		
+		if(num_real_source != temporaneo.size()){
+			num_initial = temporaneo.size();
+			*initial = (Hypervector*) malloc(sizeof(Hypervector)*num_initial);
+			
+		}else{
+			num_initial = num_real_source;
+		}
+		int itera=0,ttop;
 		pair tt;
 		
 		
-		for(auto it=temporaneo.begin(); it!=temporaneo.end(); it++){
-			
-			tt = it->second;
-			(*initial)[itera] = {(*Edges)[tt.second].from,tt.first};
-			
-			itera++;
+		bool * manca = (bool*) malloc(sizeof(bool)*num_vertices);
+		for(int i=0; i<num_vertices; i++) manca[i]=true;
+		
+		if(!succinto){
+			for(auto it=temporaneo.begin(); it!=temporaneo.end(); it++){
+				tt = it->second;
+					(*initial)[itera] = {(*Edges)[tt.second].from,tt.first, true};
+					for(int i=0; i<(*Edges)[tt.second].len_fr; i++){
+						manca[(*Edges)[tt.second].from[i]] = false;
+					}
+					itera++;
+				
+			}
+		}else{
+			for(int i=0; i<num_real_source; i++){
+				for(int j=0; j<(*initial)[i].len; j++){
+					printf("%d ",(*initial)[i].vectors[j]);
+					manca[(*initial)[i].vectors[j]]=false;
+					
+				}
+			}
+			for(int i=0; i<num_vertices; i++) (*Vertices)[i] = i;
+				
 		}
+		itera = 0;
+		for(int i=0; i<num_vertices; i++) if(manca[i]) itera++;
+		
+		Hypervector* tempo = (Hypervector*) malloc(sizeof(Hypervector)*(itera+num_initial));
+		
+		copyaa(tempo,*initial,num_initial);
+		
+		ttop=0;
+		for(int i=0; i<num_vertices; i++){
+			if(manca[i]){
+				tempo[num_initial+ttop] =  {new int{i},1,false};
+				ttop++;
+			}
+		}
+		
+	
+		
+		num_initial += itera;
+		free(*initial);
+		
+		
+		*initial = (Hypervector*) malloc(sizeof(Hypervector)*num_initial);
+		copyaa(*initial, tempo, num_initial);
+		
 			
 		file_graph.close();
 		printf("Superset: %d ok\n",num_initial);
 		#ifdef DEBUG
 		lineStr++;
 		#endif
+		
 	}
 	
 }
@@ -246,29 +376,45 @@ Write graph from file
 */
 /*
 Input:
-	Vertices : pointer of integers 
+	matrixSuc : matrix of Graphs
 	num_vertices : number of integers pointed from Vertices
-	Edges : pointer of Hyperarcs
-	num_edges : number of hyperarcs pointed from Edges
+	Sources : array of Hypervector (Source set)
+	num_sources : number of Hypervector pointed from Sources
 	FILE : relative path and file name
 */
-void writeGraph(int* Vertices, int num_vertices, Hyperarc* Edges, int num_edges, std::string FILE){
+void writeGraph(bool** matrixSuc, int num_vertices, Hypervector* Sources, int num_source, int num_edges, std::string FILE){
 	std::ofstream myFile;
+	int num_source_real = 0;
+	
+	for(int i=0; i<num_source; i++) if(Sources[i].real) num_source_real++;
+	
 	myFile.open(FILE);
-	myFile << "INI " << num_vertices <<"," << num_edges <<"\n";
+	myFile << "SUC " << num_vertices <<"," << num_source_real << "," << num_edges << "," << num_source << "\n";
 	#ifdef DEBUG
 	lineStr++;
 	#endif
-	for(int i=0; i<num_vertices; i++){
-		myFile << "(VE " << i <<")\n";
-	}
-	for(int i=0; i<(num_edges); i++){
-		myFile << "(HA {";
-		for(int j=0; j<(Edges)[i].len_fr; j++){
-			myFile << (Edges)[i].from[j];
-			if(j!=((Edges)[i].len_fr)-1) myFile << ",";
+	for(int i=0; i<num_source; i++){
+		if(Sources[i].real){
+			myFile << "(SE {";
+			for(int j=0; j<Sources[i].len; j++){
+				myFile << Sources[i].vectors[j];
+				if(j!=Sources[i].len-1)
+					myFile << ",";
+				
+			}
+			myFile <<"},"<< Sources[i].len <<")\n";
 		}
-		myFile << "}," << (Edges)[i].len_fr<<","<<(Edges)[i].to <<")\n";
+	}
+	myFile <<"MAT\n";
+	for(int i=0; i<(num_source); i++){
+		if(Sources[i].real){
+			myFile << "RGS ";
+			for(int j=0; j<num_vertices; j++){
+				myFile << matrixSuc[i][j]? 1:0;
+				if(j!=num_vertices-1) myFile << ",";
+			}
+			myFile <<" REG\n";
+		}
 	}
 	
 	
@@ -309,7 +455,14 @@ __device__ bool equalHyperVector(int * hyperarcs, int * vectors, int minLen){
 	}
 	return ok;
 }
-
+__device__ bool equalHyperVectorL(int * hyperarcs, int * vectors, int len1, int len2){
+	bool ok=true;
+	if(len1!=len2) return false;
+	for(int i=0; i<len1 && ok; i++){
+		ok=hyperarcs[i]==vectors[i];
+	}
+	return ok;
+}
 
 /*   ## GPU ##
 Find neighbors during one BFS step
@@ -329,98 +482,8 @@ Input:
 MODIFY:
 	Cost, FrontierUpdate
 */
-__global__ void neighOp(int *Vertices, int num_vertices, Hyperarc * Edges, int num_edges, bool* FrontierUpdate, bool* Visited, int* Cost, int* thidLast, int len, int first){
-	int thid = threadIdx.x;
-	bool thereIs = false;
-	int thidI;
-	
-	
-		
-	for(int Pass=0; Pass<ceilf((num_edges/(blockDim.x)))+1; Pass++){
-		thidI = thid + Pass*(blockDim.x);
-	
-		if(thidI<num_edges){
-			for(int i=0; i<num_vertices; i++){
-				thereIs = false;	
-				if(thidLast[0]>=num_vertices || Edges[thidI].to>=num_vertices) printf("ERRORE");
-				if(Edges[thidI].to==Vertices[i]){
-					if(equalHyperVector(Edges[thidI].from_dev,thidLast,len) && first==1){
-						if(Visited[Vertices[i]]==false){
-							Cost[Vertices[i]] = Cost[thidLast[0]]+1;
-							FrontierUpdate[Vertices[i]] = true;
-						}
-					}else if(first!=1){
-						for(int j=0; j<Edges[thidI].len_fr && !thereIs; j++){
-							thereIs = Edges[thidI].from_dev[j]==thidLast[0];
-						}
-						if(thereIs){
-							if(Visited[Vertices[i]]==false){
-								Cost[Vertices[i]] = Cost[thidLast[0]]+1;
-								FrontierUpdate[Vertices[i]] = true;
-							}
-						}
-					}
-					
-				}
-			}
-		}
-	}
-	__syncthreads();
-	
-}
 
 
-/*   ## GPU ##
-One step of BFS 
-*/
-/*
-Input:
-	Vertices : pointer of integers 
-	num_vertices : number of integers pointed from Vertices
-	Edges : pointer of Hyperarcs
-	num_edges : number of hyperarcs pointed from Edges
-	Frontier : the Frontier of the step
-	FrontierUpdate : tracks changes during BFS step
-	Visited : tracks the visited nodes during BFS
-	Cost : the distance between start node and the other node
-	first : array of starting node (superset)
-	len : lenght of first (-1 for all step without the first)
-!!!!!!
-MODIFY:
-	Frontier, Cost, Visited
-!!!!!!
-Kernel invoked (1 GPU block)
-*/	
-
-__global__ void bfs(int *Vertices, int num_vertices, Hyperarc * Edges,const int num_edges, bool * Frontier, bool* FrontierUpdate, bool* Visited, int* Cost, int* first, int len){
-	int thid = blockIdx.x * blockDim.x + threadIdx.x;
-	int thidI;
-	
-	__syncthreads();
-	
-		for(int Pass=0; Pass<ceilf(num_vertices/(blockDim.x))+1; Pass++){
-			thidI = thid + Pass*(blockDim.x);
-		
-			if(thidI < num_vertices)
-				if(Frontier[thidI]){
-					if(len==-1){
-						Frontier[thidI] = false;
-						neighOp<<< 1, MAX_THREADS>>>(Vertices, num_vertices,  Edges, num_edges, FrontierUpdate, Visited, Cost, new int{thidI},1, 0);
-					}else{
-						if(thidI==first[0]){
-							for(int i=0; i<len; i++){
-								Frontier[first[i]]=false;
-							}
-							neighOp<<< 1,MAX_THREADS>>>(Vertices, num_vertices,  Edges, num_edges, FrontierUpdate, Visited, Cost, first,len, 1);
-						}
-					}
-					
-				}
-			__syncthreads();
-		}
-	
-	__syncthreads();
-}
 
 
 /*   ## GPU ##
@@ -428,7 +491,7 @@ Update the ausiliary structur of BFS
 */
 /*
 Input:
-	num_vertices : number of integers pointed from Vertices
+	len : number of integers pointed from every array
 	FrontierUpdate : tracks changes during BFS step
 	Visited : tracks the visited nodes during BFS
 	Cost : the distance between start node and the other node
@@ -437,15 +500,15 @@ Input:
 MODIFY:
 	Frontier, Visited, next, FrontierUpdate
 */
-__global__ void bfs_update(int num_vertices, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * next){
+__global__ void bfs_update(int len, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * next){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI = 0;
 		
 	__syncthreads();
 	
-	for(int Pass=0; Pass<ceilf((num_vertices/(blockDim.x)))+1; Pass++){
-		thidI = thid + Pass*(blockDim.x );
-		if(thidI<num_vertices){
+	for(int Pass=0; Pass<ceilf((len/(blockDim.x)))+1; Pass++){
+		thidI = thid + Pass*(gridDim.x*blockDim.x );
+		if(thidI<len){
 			
 			if(FrontierUpdate[thidI]){
 				Frontier[thidI] = true;
@@ -455,155 +518,9 @@ __global__ void bfs_update(int num_vertices, bool * Frontier, bool * FrontierUpd
 				
 			}
 		}
-	__syncthreads();
 	}
 	__syncthreads();
-}
-
-
-/*   ## CPU ##
-Calculate the neighbors through BFS on GPU
-*/
-/*
-Input:
-	Vertices : pointer of integers 
-	num_vertices : number of integers pointed from Vertices
-	Edges : pointer of Hyperarcs
-	num_edges : number of hyperarcs pointed from Edges
-	node : the starting node of BFS
-Return:
-	Succint Closure hyperarcs
-!!!!!!
-MODIFY:
-	Edges
-!!!!!!
-Sequentially
-	Kernel invoked (MAX_BLOCKS GPU block)
-	Kernel invoked (MAX_BLOCKS GPU block)
-!!!!!!
-Allocate num_vertices*3 bool array CPU/GPU
-Allocate num_vertices*1 int  array CPU
-Allocate num_vertices*2 int  array GPU
-Allocate num_edges Hyperarc  array GPU
-Allocate new Edges array that contains the succint closure hyperarcs
-Allocate Temporary Array to copy to GPU the set of node of the hyperarcs
-*/
-Hyperarc * Edges_DEV;
-int * Vertices_DEV;
-
-Hyperarc * graph_bfs_nieces(int * Vertices, int num_vertices, Hyperarc * Edges, const int num_edges, Hypervector node){
-	int * Cost_HOS, *Cost_DEV;
-	bool * Frontier_HOS, *Frontier_DEV;
-	bool * FrontierUpdate_HOS, *FrontierUpdate_DEV;
-	bool * Visited_HOS, *Visited_DEV;
 	
-	int * from;
-	Hyperarc *newEdges;
-	int sizeEdges=0;
-	
-	Cost_HOS = (int*) malloc(sizeof(int)*num_vertices);
-	gpuErrchk(cudaMalloc((void**)&Cost_DEV, sizeof(int)*num_vertices));
-	
-	Frontier_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
-	gpuErrchk(cudaMalloc((void**)&Frontier_DEV, sizeof(bool)*num_vertices));
-	
-	FrontierUpdate_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
-	gpuErrchk(cudaMalloc((void**)&FrontierUpdate_DEV, sizeof(bool)*num_vertices));
-	
-	Visited_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
-	gpuErrchk(cudaMalloc((void**)&Visited_DEV, sizeof(bool)*num_vertices));
-	
-	
-	for(int i=0; i<num_vertices; i++){
-		Cost_HOS[i] = -1;
-		Frontier_HOS[i] = false;
-		FrontierUpdate_HOS[i] = false;
-		Visited_HOS[i] = false;
-	}
-	for(int i=0; i<node.len; i++){
-		Frontier_HOS[node.vectors[i]] 	= true;
-		Visited_HOS[node.vectors[i]] 	= true;
-		Cost_HOS[node.vectors[i]] 		= 0;
-	}
-	
-	cudaMemcpy(Cost_DEV, Cost_HOS, sizeof(int)*num_vertices, cudaMemcpyHostToDevice);
-	cudaMemcpy(Frontier_DEV, Frontier_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
-	cudaMemcpy(FrontierUpdate_DEV, FrontierUpdate_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
-	cudaMemcpy(Visited_DEV, Visited_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
-	
-	
-	int next_HOS, *next_DEV, len_HOS = node.len;
-	
-	gpuErrchk(cudaMalloc((void**) &next_DEV, sizeof(int)));	
-	
-	
-	
-	
-	gpuErrchk(cudaMalloc((void**)&from, sizeof(int)*node.len));
-			
-	gpuErrchk(cudaMemcpy(from, node.vectors,  sizeof(int)*node.len, cudaMemcpyHostToDevice));
-	
-	
-
-	
-	next_HOS = 1;
-	
-	int m=0;
-	
-	while(next_HOS==1){
-		next_HOS = 0;
-		gpuErrchk(cudaMemcpy(next_DEV, &next_HOS, sizeof(int), cudaMemcpyHostToDevice));
-		
-		bfs<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(Vertices_DEV, num_vertices, Edges_DEV, num_edges, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, from, len_HOS);
-		cudaDeviceSynchronize();
-		gpuErrchk(cudaGetLastError());
-		
-		bfs_update<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(num_vertices, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, next_DEV);
-		cudaDeviceSynchronize();
-		gpuErrchk(cudaGetLastError());
-		
-		gpuErrchk(cudaMemcpy(&next_HOS, next_DEV , sizeof(int), cudaMemcpyDeviceToHost));
-		
-		len_HOS = -1;
-		
-		m++;
-		
-	}
-	
-	
-	
-	cudaMemcpy(Cost_HOS, Cost_DEV, sizeof(int)*num_vertices, cudaMemcpyDeviceToHost);
-	
-	for(int i=0; i<num_vertices; i++){
-		if(Cost_HOS[Vertices[i]]>=1) sizeEdges++;
-	}
-	
-	
-	newEdges = (Hyperarc*) malloc(sizeof(Hyperarc)*(sizeEdges+1));
-	int k=0;
-	for(int i=0; i<num_vertices && k<sizeEdges; i++){
-		if(Cost_HOS[Vertices[i]]>=1){
-			newEdges[k] = {(int*)malloc(sizeof(int)*node.len),NULL,node.len,Vertices[i]};
-			std::copy(node.vectors,(node.vectors)+(node.len), newEdges[k].from);
-						
-			
-			k++;
-		}
-	}
-	
-	
-	
-	newEdges[k] = {NULL,NULL,-1,-1};
-	
-
-	gpuErrchk(cudaFree(from));
-	gpuErrchk(cudaFree(next_DEV));
-	gpuErrchk(cudaFree(Frontier_DEV));
-	gpuErrchk(cudaFree(FrontierUpdate_DEV));
-	gpuErrchk(cudaFree(Visited_DEV));
-	gpuErrchk(cudaFree(Cost_DEV));
-	
-	return newEdges;
 }
 
 
@@ -642,6 +559,219 @@ int copyaa(Hyperarc* a, Hyperarc* b, int w){
 	return 0;
 }
 
+/*   ## CPU ##
+Force the copy of array inside another (struct of Hypervector)
+*/
+/*
+Input:
+	a : pointer of Hypervector (to)
+	b : pointer of Hypervector (from)
+	w : size of a and b 
+return:
+	if the copy ended 0, anything else
+!!!!!!
+MODIFY:
+	a
+!!!!!!
+MULTI PARALLELISM OPENMP
+*/
+int copyaa(Hypervector* a, Hypervector* b, int w){
+	/*int i;
+	
+	#pragma omp parallel for private(i) shared(a,b) num_threads(nThr)
+	for(i=0; i<w; i++){
+		a[i] = b[i];
+	}
+	*/
+	//std::memcpy(a,b,w*sizeof(Hypervector));
+	
+	//using std c++17
+	std::copy(std::execution::par,b,b+w,a);
+	
+	return 0;
+}
+
+
+__device__ bool includes(int x, int * arr, int len){
+	bool ok=false;
+	for(int i=0; i<len && !ok; i++){
+		ok = arr[i]==x;
+	}
+	return ok;
+}
+
+__device__ int maxDL(int* v, int *v1, int l, int l1){
+	int r=v[0];
+	for(int i=0; i<l1 && v1[i]<l; i++) if(r<v[(v1[i])]) r=v[v1[i]];
+	return r;
+}
+/*   ## GPU ##
+Find neighbors during one BFS step
+*/
+/*
+Input:
+	Vertices : pointer of integers 
+	num_vertices : number of integers pointed from Vertices
+	Edges : pointer of Hyperarcs
+	num_edges : number of hyperarcs pointed from Edges
+	FrontierUpdate : tracks changes during BFS step
+	Visited : tracks the visited nodes during BFS
+	Cost : the distance between start node and the other node
+	thidLast : the node from to which to search for hyperarcs
+	first : first time flags 
+!!!!!!
+MODIFY:
+	Cost, FrontierUpdate
+*/
+__global__  void neighOp_M(bool ** adjMatrix, int idSource, int num_vertices,bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, int num_source){
+	int thid = threadIdx.x;
+	int thidI;
+			
+	for(int Pass=0; Pass<ceilf((num_vertices/(blockDim.x)))+1; Pass++){
+		thidI = thid + Pass*(blockDim.x);
+		
+		if(thidI<num_vertices){
+			if(adjMatrix[idSource][thidI]){
+				
+				for(int i=0; i<num_source; i++){
+					if(includes(thidI,Sources[i].vectors, Sources[i].len) && Visited[i]==false){
+						Cost[thidI] = maxDL(Cost,Sources[idSource].vectors, num_vertices, Sources[idSource].len)+1;
+						FrontierUpdate[i] = true;
+					}
+				}
+			}
+			
+		}
+	}
+	__syncthreads();
+	
+}
+
+__global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources){
+	int thid = blockIdx.x * blockDim.x + threadIdx.x;
+	int thidI;
+	
+		
+	__syncthreads();
+	
+	for(int Pass=0; Pass<ceilf(num_source/(gridDim.x*blockDim.x))+1; Pass++){
+		thidI = thid + Pass*(gridDim.x*blockDim.x);
+	
+		if(thidI < num_source)
+			if(Frontier[thidI]){
+				Frontier[thidI]=false;
+				Visited[thidI]=true;
+				neighOp_M<<<1, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source);
+			}
+	}
+	__syncthreads();
+	
+}
+		
+
+bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV, int num_vertices, int num_source, int sourceStart){
+	bool * ret;
+				
+	int * Cost_HOS, *Cost_DEV;
+	bool * Frontier_HOS, *Frontier_DEV;
+	bool * FrontierUpdate_HOS, *FrontierUpdate_DEV;
+	bool * Visited_HOS, *Visited_DEV;
+	
+	int next_HOS, *next_DEV;
+	
+			
+	Cost_HOS = (int*) malloc(sizeof(int)*num_vertices);
+	gpuErrchk(cudaMalloc((void**)&Cost_DEV, sizeof(int)*num_vertices));
+	
+	Frontier_HOS = (bool*) malloc(sizeof(bool)*num_source);
+	gpuErrchk(cudaMalloc((void**)&Frontier_DEV, sizeof(bool)*num_source));
+	
+	FrontierUpdate_HOS = (bool*) malloc(sizeof(bool)*num_source);
+	gpuErrchk(cudaMalloc((void**)&FrontierUpdate_DEV, sizeof(bool)*num_source));
+	
+	Visited_HOS = (bool*) malloc(sizeof(bool)*num_source);
+	gpuErrchk(cudaMalloc((void**)&Visited_DEV, sizeof(bool)*num_source));
+	
+	next_HOS = 1;
+	gpuErrchk(cudaMalloc((void**) &next_DEV, sizeof(int)));	
+	
+	gpuErrchk(cudaGetLastError());
+		
+	ret = (bool*) malloc(sizeof(bool) * num_vertices);
+	
+	for(int i=0; i<num_vertices; i++){
+		ret[i] = false;
+		Cost_HOS[i] = -1;
+	}
+	
+	for(int i=0; i<num_source; i++){
+		Frontier_HOS[i] = false;
+		FrontierUpdate_HOS[i] = false;
+		Visited_HOS[i] = false;
+	}
+	
+	
+	
+	Frontier_HOS[sourceStart] 	= true;
+	Visited_HOS[sourceStart] 		= true;
+	for(int i=0; i<Set[sourceStart].len; i++){
+		Cost_HOS[Set[sourceStart].vectors[i]] 		= 0;
+		for(int j=0; j<num_source; j++)
+			for(int k=0; k<Set[j].len; k++)
+				if(Set[sourceStart].vectors[i]==Set[j].vectors[k]){
+					
+					Frontier_HOS[j] = true;
+					FrontierUpdate_HOS[j] = true;
+					Visited_HOS[j] = true;
+				}
+					
+	}
+	
+	
+	cudaMemcpy(Cost_DEV, Cost_HOS, sizeof(int)*num_vertices, cudaMemcpyHostToDevice);
+	cudaMemcpy(Frontier_DEV, Frontier_HOS, sizeof(bool)*num_source, cudaMemcpyHostToDevice);
+	cudaMemcpy(FrontierUpdate_DEV, FrontierUpdate_HOS, sizeof(bool)*num_source, cudaMemcpyHostToDevice);
+	cudaMemcpy(Visited_DEV, Visited_HOS, sizeof(bool)*num_source, cudaMemcpyHostToDevice);
+	gpuErrchk(cudaGetLastError());
+		
+		
+	while(next_HOS==1){
+		next_HOS = 0;
+		gpuErrchk(cudaMemcpy(next_DEV, &next_HOS, sizeof(int), cudaMemcpyHostToDevice));
+		
+		bfs_M<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(adjMatrix_DEV, num_vertices, num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV);
+		cudaDeviceSynchronize();
+		gpuErrchk(cudaGetLastError());
+		
+		bfs_update<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, next_DEV);
+		cudaDeviceSynchronize();
+		gpuErrchk(cudaGetLastError());
+		
+		gpuErrchk(cudaMemcpy(&next_HOS, next_DEV , sizeof(int), cudaMemcpyDeviceToHost));
+		
+		
+	}
+		
+	cudaMemcpy(Cost_HOS, Cost_DEV, sizeof(int)*num_vertices, cudaMemcpyDeviceToHost);
+	
+	for(int i=0; i<num_vertices; i++)
+		if(Cost_HOS[i]>0){
+			ret[i]=true;
+		}
+	
+	
+	
+	gpuErrchk(cudaFree(next_DEV));
+	gpuErrchk(cudaFree(Frontier_DEV));
+	gpuErrchk(cudaFree(FrontierUpdate_DEV));
+	gpuErrchk(cudaFree(Visited_DEV));
+	gpuErrchk(cudaFree(Cost_DEV));
+	
+	gpuErrchk(cudaGetLastError());
+	
+	return ret;
+}
+
 
 
 /*   ## CPU ##
@@ -663,162 +793,288 @@ MULTI PARALLELISM OPENMP
 !!!!!!
 Allocate temporary (num_start) int array CPU (split between threads)
 */
-Hyperarc* gpu_bfs(int * Vertices, int num_vertices, Hyperarc ** Edges, int &num_edges, Hypervector * Start, int num_start){
-	Hyperarc ** nArch, * newEdges;
-	int nNew_Arch=0, *sizeTot;
-	#ifdef DEBUG
-	int totOp=0;
-	#endif
+bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int num_vertices, int &num_edges){
+	bool ** adjMatrix;
+	bool ** adjMatrix_DEV;
+	
 	int * from;
-	std::string complete="";
+	bool * fromb;
 	
+	Hypervector * set_DEV, * set_HOS;
 	
+	int len_frT, sum=0, totOp=0;
+	
+	std::string completo = "";
+	
+	adjMatrix = (bool**) malloc(sizeof(bool*) * num_source);
+	gpuErrchk(cudaMalloc((void**) &adjMatrix_DEV, sizeof(bool*) * num_source));
+	
+	set_HOS = (Hypervector*) malloc(sizeof(Hypervector)*num_source);
+	gpuErrchk(cudaMalloc((void**)&set_DEV, sizeof(Hypervector)*num_source));
+	gpuErrchk(cudaGetLastError());
+		
+	fromb = (bool*) malloc(sizeof(bool)*num_vertices);
 
+	for(int i=0; i<num_source; i++){
+		gpuErrchk(cudaMalloc(&adjMatrix[i], sizeof(bool)*num_vertices));
+		gpuErrchk(cudaMemcpy(adjMatrix[i], MatrixAdj[i], sizeof(bool)*num_vertices, cudaMemcpyHostToDevice));
+	}
+	
+	gpuErrchk(cudaMemcpy(adjMatrix_DEV, adjMatrix, sizeof(bool*)*num_source, cudaMemcpyHostToDevice));
+	
+	gpuErrchk(cudaGetLastError());
+	
+	for(int i=0; i<num_source; i++){	
+		len_frT = (Set)[i].len;
+		gpuErrchk(cudaMalloc((void**)&from, sizeof(int) * len_frT));
+		gpuErrchk(cudaMemcpy(from, (Set)[i].vectors, sizeof(int)* len_frT, cudaMemcpyHostToDevice));
+		(set_HOS)[i].vectors = from;
+		set_HOS[i].len = Set[i].len;
+	}	
+	gpuErrchk(cudaMemcpy(set_DEV, set_HOS, sizeof(Hypervector)*num_source, cudaMemcpyHostToDevice));
+	free(set_HOS);
+	
+	gpuErrchk(cudaGetLastError());
+	
+	from = (int*) malloc(sizeof(int)*nThr);
+	
+	printf("Start BFS visit...\n");
+	#ifdef DEBUG
+	lineStr+=1;
+	#endif
+	
+	#pragma omp parallel shared(adjMatrix_DEV, adjMatrix, set_DEV,Set, from, num_vertices, num_source, completo, totOp) private(fromb) num_threads(nThr)
+	{
+		int work_x_thr  = ceil(num_source/(nThr));
+		int sx 		    = omp_get_thread_num() * work_x_thr;
+		int ex 		    = sx + work_x_thr;
+		int t_num_edges = 0;
+		int num_att=0;
+				
+		from[omp_get_thread_num()] = 0;
+		
+		#ifdef DEBUG
+		printf("thread %d: %d-%d (%d)\n",omp_get_thread_num(),sx,ex,work_x_thr);
+		lineStr+=1;
+		#endif
+		
+		#pragma omp barrier
+		for(int i=sx; i<ex; i++){
+			if((Set[i].real)){
+				num_att = i;
+				fromb = gpu_bfs_suc(adjMatrix_DEV, Set, set_DEV, num_vertices, num_source, num_att); 
+					
+				t_num_edges = 0;
+				
+				adjMatrix[num_att] = (bool*)malloc(sizeof(bool)*num_vertices);
+				for(int j=0; j<num_vertices; j++){
+					if(fromb[j]) t_num_edges++;
+					adjMatrix[num_att][j] = fromb[j];
+				}
+				
+				from[omp_get_thread_num()] += t_num_edges;
+				
+				free(fromb);
+				#ifdef DEBUG
+				printf("\033[%d;0HCompletato %d/%d  (%s )            ",lineStr,totOp,omp_get_max_threads(),completo.c_str());
+				#endif
+			}
+			
+		}
+		
+		#ifdef DEBUG
+		completo+=" "+std::to_string(omp_get_thread_num());
+		#pragma omp atomic
+		totOp+=1;
+		printf("\033[%d;1HCompletato %d/%d  (%s )",lineStr,totOp,omp_get_max_threads(),completo.c_str());
+		#endif
+	}
+	
+	#pragma omp barrier
+	
+	#ifdef DEBUG
+	printf("\nEnd BFS visit\n");
+	lineStr+=2;
+	#endif
+	num_edges = 0;
+	
+	#pragma omp parallel for reduction (+:sum)
+	for (int i=0;i<nThr;i++)
+	  sum=sum+from[i];
+  
+  
+	
+	num_edges = sum;
+	
+	
+	gpuErrchk(cudaFree(adjMatrix_DEV));
+	gpuErrchk(cudaFree(set_DEV));
+	
+	
+	
+	return adjMatrix;
+}
+
+__global__ void checkEdgeFromSource(Hyperarc * Edges, int num_edges, Hypervector * source, int sID,  int vertice, bool ** res, int rID, int vID){
+	int thid = threadIdx.x;
+	int thidI;
+	
+	
+	__syncthreads();
+	
+	for(int Pass=0; Pass<ceilf(num_edges/(blockDim.x))+1; Pass++){
+		thidI = thid + Pass*(blockDim.x);
+		if(thidI<num_edges){
+			if(equalHyperVectorL(Edges[thidI].from_dev, source[sID].vectors, Edges[thidI].len_fr, source[sID].len) && vID==Edges[thidI].to) {
+				//printf("(%i %i-%i %i)",thidI,Edges[thidI].to,sID,vID);
+				res[rID][vID] = true;
+			
+			}
+		}		
+	}
+	__syncthreads();
+}
+
+/*   ## GPU ##
+Create a adjacent's matrix with parallelism
+*/
+__global__ void succintaKernel(int *Vertices, Hyperarc * Edges, Hypervector * Source, int num_vertices, int num_edges, int num_source, bool ** retMatrix){
+	int thid = blockIdx.x * blockDim.x + threadIdx.x;
+	int thidI;
+	int sourceID, vectorID;
+	
+	
+	if(thid==0) printf("%d %d\n",num_source,num_vertices);
+	__syncthreads();
+	
+	
+	for(int Pass=0; Pass<ceilf((num_source*num_vertices)/(gridDim.x*blockDim.x))+1; Pass++){
+		thidI = thid + Pass*(gridDim.x*blockDim.x);
+		if(thidI<(num_source*num_vertices)){
+			sourceID = (int) (thidI / num_vertices);
+			vectorID = (int) (thidI % num_vertices);
+			
+			if(sourceID<num_source && vectorID<num_vertices){
+				checkEdgeFromSource<<<1, MAX_THREADS>>>(Edges, num_edges, Source, sourceID, Vertices[vectorID], retMatrix, sourceID, vectorID);
+				
+			}
+		}
+	}
+	__syncthreads();
+	
+	
+}
+
+bool ** succinta(int *Vertices, Hyperarc *Edges, Hypervector *Set, int num_vertices, int num_edges, int num_source){
+	bool ** adjMatrix = (bool**) malloc(sizeof(bool*) * num_source);
+	bool ** adjMatrix_DEV;
+	
+	Hypervector * set_DEV, * set_HOS;
+	
+	Hyperarc * Edges_DEV;
+	int * Vertices_DEV;
+	int * from;
+	bool * fromb;
+	
+	printf("Succint start\n");
+	#ifdef DEBUG
+	lineStr+=1;
+	#endif
+	
+	gpuErrchk(cudaMalloc((void**) &adjMatrix_DEV, sizeof(bool*) * num_source));
+
+	gpuErrchk(cudaGetLastError());
+	for(int i=0; i<num_source; i++){
+		gpuErrchk(cudaMalloc(&adjMatrix[i], sizeof(bool)*num_vertices));
+	}
+	
+	gpuErrchk(cudaGetLastError());
+	
+	cudaMemcpy(adjMatrix_DEV, adjMatrix, sizeof(bool*)*num_source, cudaMemcpyHostToDevice);
+	
+	gpuErrchk(cudaGetLastError());
+	
+	
 	gpuErrchk(cudaMalloc((void**)&Vertices_DEV, sizeof(int)*num_vertices));
 	gpuErrchk(cudaMalloc((void**)&Edges_DEV, sizeof(Hyperarc)*num_edges));
+	gpuErrchk(cudaMalloc((void**)&set_DEV, sizeof(Hypervector)*num_source));
+	
+	set_HOS = (Hypervector*) malloc(sizeof(Hypervector)*num_source);
 	
 	cudaMemcpy(Vertices_DEV, Vertices, sizeof(int)*num_vertices, cudaMemcpyHostToDevice);
 	
+	
+	gpuErrchk(cudaGetLastError());
+	
 	int len_frT = 0;
 	for(int i=0; i<num_edges; i++){	
-		len_frT = (*Edges)[i].len_fr;
+		len_frT = (Edges)[i].len_fr;
 		gpuErrchk(cudaMalloc((void**)&from, sizeof(int) * len_frT));
 		
-		cudaMemcpy(from, (*Edges)[i].from, sizeof(int)* len_frT, cudaMemcpyHostToDevice);
+		gpuErrchk(cudaMemcpy(from, (Edges)[i].from, sizeof(int)* len_frT, cudaMemcpyHostToDevice));
 		
 		
-		(*Edges)[i].from_dev = from;
+		(Edges)[i].from_dev = from;
 		
+	}	
+		
+	gpuErrchk(cudaMemcpy(Edges_DEV, Edges, sizeof(Hyperarc)*num_edges, cudaMemcpyHostToDevice));
+	
+	
+	len_frT = 0;
+	for(int i=0; i<num_source; i++){	
+		len_frT = (Set)[i].len;
+		gpuErrchk(cudaMalloc((void**)&from, sizeof(int) * len_frT));
+		
+		gpuErrchk(cudaMemcpy(from, (Set)[i].vectors, sizeof(int)* len_frT, cudaMemcpyHostToDevice));
+		
+		
+		(set_HOS)[i].vectors = from;
+		set_HOS[i].len = Set[i].len;
+	}	
+	gpuErrchk(cudaMemcpy(set_DEV, set_HOS, sizeof(Hypervector)*num_source, cudaMemcpyHostToDevice));
+	
+	free(set_HOS);
+	
+	gpuErrchk(cudaGetLastError());
+		
+	printf("Prepare all\n");
+	#ifdef DEBUG
+	lineStr+=1;
+	#endif
+		
+	succintaKernel<<<1, MAX_THREADS>>>(Vertices_DEV, Edges_DEV, set_DEV, num_vertices, num_edges, num_source, adjMatrix_DEV); 
+	cudaDeviceSynchronize();
+		
+	gpuErrchk(cudaGetLastError());
+	
+	
+	printf("Succinted\n");
+	#ifdef DEBUG
+	lineStr+=1;
+	#endif
+	cudaMemcpy(adjMatrix, adjMatrix_DEV, sizeof(bool)* num_source, cudaMemcpyDeviceToHost);
+	gpuErrchk(cudaGetLastError());
+	
+		
+	for(int i=0; i<num_source; i++){
+		fromb = (bool*) malloc(sizeof(bool) * num_vertices);
+		cudaMemcpy(fromb,adjMatrix[i], sizeof(bool)* num_vertices, cudaMemcpyDeviceToHost);
+	
+		adjMatrix[i] = (bool*) malloc(sizeof(bool)*num_vertices);
+		std::copy(std::execution::par,fromb,fromb+num_vertices,adjMatrix[i]);	
 	}
 	
 	
-	cudaMemcpy(Edges_DEV, *Edges, sizeof(Hyperarc)*num_edges, cudaMemcpyHostToDevice);
-	
-	
-	#pragma omp parallel num_threads(nThr) shared(complete, Vertices, Edges, Start, num_vertices, num_edges, num_start, nNew_Arch, sizeTot, newEdges) private(nArch) 
-	{
-		if(omp_get_thread_num()==0) sizeTot = (int*) malloc(sizeof(int)*omp_get_num_threads());
 		
-		int workN = ceil((double)num_start/(double)(omp_get_num_threads()));
-		int ini = workN * omp_get_thread_num();
-		int end = fmin(workN * omp_get_thread_num() + workN, num_start);
-		int * mySyze = (int*)malloc(sizeof(int)*(end-ini));
-		int mySSyze=0;
-		
-	
-		
-		#ifdef DEBUG
-		printf("%d (%d,%d)\n",omp_get_thread_num(),ini,end);
-		#pragma omp atomic
-		lineStr++;
-		#pragma omp barrier
-		#endif
-		
-		nArch = (Hyperarc**)malloc(sizeof(Hyperarc*)*workN);
-		Hypervector init;
-		for(int i=ini; i<end; i++){
-			mySyze[i-ini]=0;
-			init = (Start)[i];
-			nArch[i-ini] = graph_bfs_nieces(Vertices, num_vertices, *Edges, num_edges, init);
-			
-			#ifdef DEBUG
-			#pragma omp atomic
-			totOp+=1;
-			printf("\033[%d;1HCompletato %d/%d \t(%s )",lineStr,totOp,num_start,complete.c_str());
-			#endif
-			for(int j=0; j<num_vertices && (nArch[i-ini][j].to!=-1); j++){
-				#pragma omp atomic
-				nNew_Arch+=1;
-								
-				mySSyze++;
-				mySyze[i-ini]++;
-			}
-		}
-		#ifdef DEBUG
-		complete+=" "+std::to_string(omp_get_thread_num());
-		#endif
-		
-		sizeTot[omp_get_thread_num()] = mySSyze;
-		
-		#pragma omp barrier
-		if(omp_get_thread_num()==0){
-			newEdges = (Hyperarc*) malloc(sizeof(Hyperarc)*(nNew_Arch+num_edges));
-			#ifdef DEBUG
-			printf("\n");
-			#pragma omp atomic
-			lineStr++;
-			#endif
-		}
-		
-		#pragma omp barrier
-		int idx=0,ida,len=end-ini,ivi;
-		
-		ivi=0;
-		for(int i=0; i<omp_get_thread_num(); i++) ivi+=sizeTot[i];
-		
-		#ifdef DEBUG
-		printf("%d: ini %d-%d (%d)\n", omp_get_thread_num(), ini, ivi+mySSyze, (nNew_Arch+num_edges));
-		#pragma omp atomic
-		lineStr++;
-		#endif
-		
-		ida=ivi; 
-		
-		while(ida<ivi+mySSyze){
-			for(int j=0;j<len; j++){
-				if(idx<mySyze[j]){
-					newEdges[ida] = nArch[j][idx];
-					ida++;
-					
-				
-				}
-				
-				
-			}
-			idx++;
-			
-		}
-		
-		
-		
-		#ifdef DEBUG
-		printf("finito %d (%d)\n",omp_get_thread_num(), (ida));
-		lineStr++;
-		#endif
-		#pragma omp barrier
-	}
+	cudaFree(adjMatrix_DEV);
 	
 	gpuErrchk(cudaFree(Edges_DEV));
 	gpuErrchk(cudaFree(Vertices_DEV));
-	
-	
-	#ifdef DEBUG
-	printf("copia finale\n");
-	lineStr++;
-	#endif
-	/*
-	for(int i=0; i<num_edges; i++)
-		newEdges[i+nNew_Arch] = (*Edges)[i];
-	
-	
-	*/
-	num_edges = nNew_Arch;
-	free(*Edges);
-	
-	
-	
-	printf("inizio copia");
-	(*Edges) = (Hyperarc*) malloc(sizeof(Hyperarc*)*num_edges);
-	(*Edges) = newEdges;
-	printf(" %s",*Edges==NULL? "error":"");
-	printf("%s\n",copyaa((*Edges),(newEdges), (num_edges))==0?"terminata":" error");
-	#ifdef DEBUG
-	lineStr++;
-	#endif
-	
-	return *Edges;
-	
-	
+	gpuErrchk(cudaFree(set_DEV));
+	gpuErrchk(cudaGetLastError());
+		
+	return adjMatrix;
 }
 
 
@@ -833,15 +1089,13 @@ Input:
 */
 int main(int argn, char ** args){
 	
-	
-	
-	
 	system("cls");
 	
 	Hyperarc** Edges	  = (Hyperarc**) malloc(sizeof(Hyperarc*));
 	Hypervector** initial = (Hypervector**) malloc(sizeof(Hypervector*));
 	int ** Vertices		  = (int**) malloc(sizeof(int*));
 	
+	bool ** MatrixAdj;
 	
 	int num_vertices=0, num_edges=0, num_initial=0;
 	bool argg=false;
@@ -936,7 +1190,7 @@ int main(int argn, char ** args){
 			printf("%d",(*initial)[i].vectors[j]);
 			if(j!=((*initial)[i].len)-1) printf(",");
 		}
-		printf("}, %d)\n",(*initial)[i].len);
+		printf("}, %d, %d)\n",(*initial)[i].len, (*initial)[i].real?1:0);
 		#ifdef DEBUG
 		lineStr++;
 		#endif
@@ -954,7 +1208,35 @@ int main(int argn, char ** args){
 	#ifdef TIME
 	begin = std::chrono::high_resolution_clock::now();
 	#endif
-	*Edges = gpu_bfs(*Vertices, num_vertices, Edges, num_edges, *initial, num_initial);
+	
+	MatrixAdj = succinta(*Vertices, *Edges, *initial, num_vertices, num_edges, num_initial);
+	
+	#ifdef DEBUG
+	for(int i=0; i<num_initial; i++){
+		for(int j=0; j<num_vertices && (*initial)[i].real; j++)
+			printf("%d ",MatrixAdj[i][j]? 1:0);
+		if((*initial)[i].real) {
+			printf("\n");
+			lineStr+=1;
+		}
+	}
+	#endif
+	//*Edges = gpu_bfs(*Vertices, num_vertices, Edges, num_edges, *initial, num_initial);
+
+	MatrixAdj = gpu_trans_succ(MatrixAdj, *initial, num_initial, num_vertices, num_edges);
+
+	printf("\n");
+	#ifdef DEBUG
+	lineStr+=2;
+	#endif
+	for(int i=0; i<num_initial; i++){
+		for(int j=0; j<num_vertices && (*initial)[i].real; j++)
+			printf("%d ",MatrixAdj[i][j]? 1:0);
+		if((*initial)[i].real) {
+			printf("\n");
+			lineStr+=1;
+		}
+	}
 
 	#ifdef TIME
 	end = std::chrono::high_resolution_clock::now();
@@ -975,29 +1257,16 @@ int main(int argn, char ** args){
 	#endif
 	#endif
 	#endif
-	#ifndef HIDE
 	
-	for(int i=0; i<(num_edges); i++){
-		printf("(HA {");
-		for(int j=0; j<(*Edges)[i].len_fr; j++){
-			printf("%d",(*Edges)[i].from[j]);
-			if(j!=((*Edges)[i].len_fr)-1) printf(",");
-		}
-		printf("},%d,%d)\n",(*Edges)[i].len_fr,(*Edges)[i].to);
-		#ifdef DEBUG
-		lineStr++;
-		#endif
-	}
-	#endif
 	
 	#ifdef FILE_OUT
 	printf("Writing on file");
 	if(argn>1){
 		
 		file_name = (file_name.substr(0,file_name.find(".", 2)) + ("_new.txt"));
-		writeGraph(*Vertices,num_vertices, *Edges, num_edges, file_name );
+		writeGraph(MatrixAdj,num_vertices, *initial, num_initial, num_edges, file_name );
 	}else
-		writeGraph(*Vertices,num_vertices, *Edges, num_edges,"prova_new.txt");
+		writeGraph(MatrixAdj,num_vertices, *initial, num_initial, num_edges, "prova_new.txt");
 	#ifdef TIME
 		writeTime(num_vertices,num_edges);
 	#endif
