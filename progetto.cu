@@ -3,13 +3,16 @@
 #																						#
 #	    	  			    hypergraph transitive closure 								#
 # nvcc -rdc=true -lineinfo -std=c++17 -Xcompiler -openmp .\progetto.cu -o progetto.exe	#
-#			 			-D HIDE  : hide the output										#
+#			 			-D HIDE  : hide the output of graph								#
 #			 			-D DEBUG : show information on runtime							#
 #			 			-D FILE_OUT : export graph to file								#
 #			 			-D MAX_THREADS : max cuda threads 								#
-#			 			-D MAX_BLOCKS : max cuda blocks 								#
+#			 			-D MAX_BLOCKS_A : max cuda blocks BFS							#
+#			 			-D MAX_BLOCKS_B : max cuda blocks succintion					#
 #			 			-D TIME : enable time control	 								#
 #			 			-D NO_INPUT : remove enter clic 								#
+#			 			-D NTHR : number of cpu threads 								#
+#			 			-D NTAB : hide the succinted graph outupt						#
 #																						#
 #########################################################################################
 */
@@ -59,8 +62,11 @@ Experimental:
 #ifndef MAX_THREADS
 #define MAX_THREADS 128
 #endif
-#ifndef MAX_BLOCKS
-#define MAX_BLOCKS 1
+#ifndef MAX_BLOCKS_A
+#define MAX_BLOCKS_A 1
+#endif
+#ifndef MAX_BLOCKS_B
+#define MAX_BLOCKS_B 1
 #endif
 #ifdef NTHR
 	int nThr = NTHR;
@@ -118,6 +124,11 @@ typedef std::pair<int, int> pair;
 
 int copyaa(Hyperarc* a, Hyperarc* b, int w);
 int copyaa(Hypervector* a, Hypervector* b, int w);
+
+bool ne_compareTwoHyerarch(Hyperarc a, Hyperarc b);
+bool compareTwoHyerarch(Hyperarc a, Hyperarc b);
+
+
 
 //Hyperarch comparison function for the unique function (NotEqual)
 bool ne_compareTwoHyerarch(Hyperarc a, Hyperarc b)
@@ -372,7 +383,7 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 }
 
 /*   ## CPU ##
-Write graph from file
+Write graph from file, succinted
 */
 /*
 Input:
@@ -380,6 +391,7 @@ Input:
 	num_vertices : number of integers pointed from Vertices
 	Sources : array of Hypervector (Source set)
 	num_sources : number of Hypervector pointed from Sources
+	num_edges : number of edges of graph
 	FILE : relative path and file name
 */
 void writeGraph(bool** matrixSuc, int num_vertices, Hypervector* Sources, int num_source, int num_edges, std::string FILE){
@@ -446,7 +458,7 @@ Input:
 	vectors : array of nodes
 	minLen : min(len(hyperarcs),len(vectors))
 Output:
-	if array is equal
+	if arrays is equal
 */
 __device__ bool equalHyperVector(int * hyperarcs, int * vectors, int minLen){
 	bool ok=true;
@@ -455,6 +467,19 @@ __device__ bool equalHyperVector(int * hyperarcs, int * vectors, int minLen){
 	}
 	return ok;
 }
+
+/*	## GPU ##
+Confront hyperarcs superset with node's array  
+*/
+/*
+Input:
+	hyperarcs : array of node inside hyperarcs
+	vectors : array of nodes
+	len1 : len(hyperarcs)
+	len2 : len(vectors)
+Output:
+	if arrays is equal
+*/
 __device__ bool equalHyperVectorL(int * hyperarcs, int * vectors, int len1, int len2){
 	bool ok=true;
 	if(len1!=len2) return false;
@@ -463,27 +488,6 @@ __device__ bool equalHyperVectorL(int * hyperarcs, int * vectors, int len1, int 
 	}
 	return ok;
 }
-
-/*   ## GPU ##
-Find neighbors during one BFS step
-*/
-/*
-Input:
-	Vertices : pointer of integers 
-	num_vertices : number of integers pointed from Vertices
-	Edges : pointer of Hyperarcs
-	num_edges : number of hyperarcs pointed from Edges
-	FrontierUpdate : tracks changes during BFS step
-	Visited : tracks the visited nodes during BFS
-	Cost : the distance between start node and the other node
-	thidLast : the node from to which to search for hyperarcs
-	first : first time flags 
-!!!!!!
-MODIFY:
-	Cost, FrontierUpdate
-*/
-
-
 
 
 /*   ## GPU ##
@@ -496,11 +500,12 @@ Input:
 	Visited : tracks the visited nodes during BFS
 	Cost : the distance between start node and the other node
 	next : check wheater to proceed or not
+	end : to share the end of operations
 !!!!!!
 MODIFY:
-	Frontier, Visited, next, FrontierUpdate
+	Frontier, Visited, next, FrontierUpdate, end
 */
-__global__ void bfs_update(int len, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * next){
+__global__ void bfs_update(int len, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * next, bool * end){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI = 0;
 		
@@ -521,6 +526,7 @@ __global__ void bfs_update(int len, bool * Frontier, bool * FrontierUpdate, bool
 	}
 	__syncthreads();
 	
+	if(thid==0) *end = true;
 }
 
 
@@ -538,8 +544,6 @@ return:
 !!!!!!
 MODIFY:
 	a
-!!!!!!
-MULTI PARALLELISM OPENMP
 */
 int copyaa(Hyperarc* a, Hyperarc* b, int w){
 	/*int i;
@@ -572,8 +576,6 @@ return:
 !!!!!!
 MODIFY:
 	a
-!!!!!!
-MULTI PARALLELISM OPENMP
 */
 int copyaa(Hypervector* a, Hypervector* b, int w){
 	/*int i;
@@ -591,7 +593,18 @@ int copyaa(Hypervector* a, Hypervector* b, int w){
 	return 0;
 }
 
-
+/*   ## GPU ##
+Device includes element in a array
+*/
+/*
+Input:
+	x : element to find
+	arr : array where find x
+	len : size of arr
+return:
+	true if element exist
+!!!!!!
+*/
 __device__ bool includes(int x, int * arr, int len){
 	bool ok=false;
 	for(int i=0; i<len && !ok; i++){
@@ -605,15 +618,14 @@ Find neighbors during one BFS step
 */
 /*
 Input:
-	Vertices : pointer of integers 
-	num_vertices : number of integers pointed from Vertices
-	Edges : pointer of Hyperarcs
-	num_edges : number of hyperarcs pointed from Edges
+	adjMatrix : hyper-graph adjacency matrix
+	idVert : last vertices visited
+	num_vertices : number of vertices in the graph
 	FrontierUpdate : tracks changes during BFS step
 	Visited : tracks the visited nodes during BFS
 	Cost : the distance between start node and the other node
-	thidLast : the node from to which to search for hyperarcs
-	first : first time flags 
+	Sources : list of all sources
+	num_source : size of Sources array
 !!!!!!
 MODIFY:
 	Cost, FrontierUpdate
@@ -629,8 +641,8 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 		if(thidI<num_source*num_vertices){
 			so = thidI/num_vertices;
 			ve = thidI%num_vertices;
-			if(includes(idVert, Sources[so].vectors, Sources[so].len)) 
-				if(adjMatrix[so][ve] && Visited[ve]==false){
+			if(adjMatrix[so][ve] && Visited[ve]==false){
+				if(includes(idVert, Sources[so].vectors, Sources[so].len)) 
 						Cost[ve] = Cost[idVert]+1;
 						FrontierUpdate[ve] = true;
 					}		
@@ -641,10 +653,29 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 	
 }
 
-__global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, int idSource){
+
+/*   ## GPU ##
+BFS step
+*/
+/*
+Input:
+	adjMatrix : hyper-graph adjacency matrix
+	num_vertices : number of vertices in the graph
+	num_source : size of Sources array
+	Frontier : the Frontier of BFS
+	FrontierUpdate : tracks changes during BFS step
+	Visited : tracks the visited nodes during BFS
+	Cost : the distance between start node and the other node
+	Sources : list of all sources
+	end : to share the end of operations
+!!!!!!
+MODIFY:
+	Cost, FrontierUpdate, Frontier, Visited, end
+*/
+
+__global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, bool * end){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI;
-	int t_source = idSource;
 		
 	__syncthreads();
 	
@@ -659,19 +690,80 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 			}
 	}
 	__syncthreads();
+	if(thid==0) *end = true;
+}
+
+
+
+/*   ## GPU ##
+Manage the BFS on the GPU
+(to remove the launch delay from CPU)
+*/
+/*
+Input:
+	adjMatrix : hyper-graph adjacency matrix
+	Frontier : the Frontier of BFS
+	FrontierUpdate : tracks changes during BFS step
+	Visited : tracks the visited nodes during BFS
+	Cost : the distance between start node and the other node
+	Set: list of all sources
+	next : flag to manage the BFS loop
+	num_source : size of Sources array
+	num_vertices : number of vertices in the graph
+	end : to share the end of operations
+!!!!!!
+MODIFY:
+	Cost, FrontierUpdate
+!!!!!!
+dumb cycle to wait that dynamic call on GPU terminates
+*/
+__global__ void bfs_main_kernel(bool ** adjMatrix, bool * Frontier,bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Set, int * next, int num_source, int num_vertices, bool * end){
+	
+	
+	*next = 1;
+	while(*next==1){
+		*next = 0;
+		*end = false;
+		bfs_M<<<MAX_BLOCKS_A, min(num_vertices, MAX_THREADS) >>>(adjMatrix, num_vertices, num_source, Frontier, FrontierUpdate, Visited, Cost, Set, end);
+		while(!*end){
+			printf("");			
+		}
+		*end=false;
+		
+		bfs_update<<<MAX_BLOCKS_A, min(num_vertices, MAX_THREADS) >>>(num_vertices, Frontier, FrontierUpdate, Visited, next, end);
+		while(!*end){
+			printf("");			
+		}
+		
+	}
 	
 }
 		
 
+/*   ## CPU ##
+Succint closure with BFS visit from sourceStart (Source)
+*/
+/*
+Input:
+	adjMatrix_DEV : hyper-graph adjacency matrix (Device pointer)
+	Set: list of all sources
+	Set_DEV: list of all sources (Device pointer)
+	num_vertices : number of vertices in the graph
+	num_source : size of Sources array
+	sourceStart : the id of source, where the BFS begins
+Output:
+	list of node visited
+
+*/
 bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV, int num_vertices, int num_source, int sourceStart){
-	bool * ret;
+	bool * ret,* end;
 				
 	int * Cost_HOS, *Cost_DEV;
 	bool * Frontier_HOS, *Frontier_DEV;
 	bool * FrontierUpdate_HOS, *FrontierUpdate_DEV;
 	bool * Visited_HOS, *Visited_DEV;
 	
-	int next_HOS, *next_DEV;
+	int *next_DEV;
 	
 			
 	Cost_HOS = (int*) malloc(sizeof(int)*num_vertices);
@@ -686,12 +778,16 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 	Visited_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
 	gpuErrchk(cudaMalloc((void**)&Visited_DEV, sizeof(bool)*num_vertices));
 	
-	next_HOS = 1;
 	gpuErrchk(cudaMalloc((void**) &next_DEV, sizeof(int)));	
+	
+	gpuErrchk(cudaMalloc((void**)&end, sizeof(bool)));
+	
 	
 	gpuErrchk(cudaGetLastError());
 		
 	ret = (bool*) malloc(sizeof(bool) * num_vertices);
+	
+	
 	
 	for(int i=0; i<num_vertices; i++){
 		ret[i] = false;
@@ -720,25 +816,11 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 	cudaMemcpy(FrontierUpdate_DEV, FrontierUpdate_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
 	cudaMemcpy(Visited_DEV, Visited_HOS, sizeof(bool)*num_vertices, cudaMemcpyHostToDevice);
 	gpuErrchk(cudaGetLastError());
+	
 		
-		
-	while(next_HOS==1){
-		next_HOS = 0;
-		gpuErrchk(cudaMemcpy(next_DEV, &next_HOS, sizeof(int), cudaMemcpyHostToDevice));
-		
-		bfs_M<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(adjMatrix_DEV, num_vertices, num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV, sourceStart);
-		cudaDeviceSynchronize();
-		gpuErrchk(cudaGetLastError());
-		
-		bfs_update<<<MAX_BLOCKS, min(num_vertices, MAX_THREADS) >>>(num_vertices, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, next_DEV);
-		cudaDeviceSynchronize();
-		gpuErrchk(cudaGetLastError());
-		
-		gpuErrchk(cudaMemcpy(&next_HOS, next_DEV , sizeof(int), cudaMemcpyDeviceToHost));
-		
-		
-	}
-		
+	bfs_main_kernel<<<1,1>>>(adjMatrix_DEV, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV, next_DEV, num_source, num_vertices,end);
+	gpuErrchk(cudaGetLastError());
+	
 	cudaMemcpy(Cost_HOS, Cost_DEV, sizeof(int)*num_vertices, cudaMemcpyDeviceToHost);
 	
 	for(int i=0; i<num_vertices; i++)
@@ -766,19 +848,20 @@ Prepare the data and lunch BFS
 */
 /*
 Input:
-	Vertices : pointer of integers 
+	MatrixAdj : hyper-graph adjacency matrix 
+	Set: list of all sources
+	num_source : number of sources in hyper-graph
 	num_vertices : number of integers pointed from Vertices
-	Edges : pointer of pointer of Hyperarcs
-	num_edges : number of hyperarcs pointed from Edges
-	Start : pointer of hypervector (the vertices from which to start the BFS)
-	num_start : number of hypervector pointed from Start
+	num_edges : number of hyperarcs in hyper-graph
+Output:
+	Adjacency Matrix of transitive succint closure of MatrixAdj
 !!!!!!
 MODIFY:
 	Edges
 !!!!!!
 MULTI PARALLELISM OPENMP
 !!!!!!
-Allocate temporary (num_start) int array CPU (split between threads)
+Allocate temporary copy of MatrixAdj, one in RAM and other in VRAM
 */
 bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int num_vertices, int &num_edges){
 	bool ** adjMatrix;
@@ -801,13 +884,15 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	gpuErrchk(cudaGetLastError());
 		
 	fromb = (bool*) malloc(sizeof(bool)*num_vertices);
-
+	
 	for(int i=0; i<num_source; i++){
 		gpuErrchk(cudaMalloc(&adjMatrix[i], sizeof(bool)*num_vertices));
 		gpuErrchk(cudaMemcpy(adjMatrix[i], MatrixAdj[i], sizeof(bool)*num_vertices, cudaMemcpyHostToDevice));
 	}
 	
 	gpuErrchk(cudaMemcpy(adjMatrix_DEV, adjMatrix, sizeof(bool*)*num_source, cudaMemcpyHostToDevice));
+	
+	
 	
 	gpuErrchk(cudaGetLastError());
 	
@@ -845,12 +930,14 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		lineStr+=1;
 		#endif
 		
+		if(omp_get_thread_num()==nThr-1) ex = num_source;
+		
 		#pragma omp barrier
 		for(int i=sx; i<ex; i++){
 			if((Set[i].real)){
 				num_att = i;
 				fromb = gpu_bfs_suc(adjMatrix_DEV, Set, set_DEV, num_vertices, num_source, num_att); 
-					
+				
 				t_num_edges = 0;
 				
 				adjMatrix[num_att] = (bool*)malloc(sizeof(bool)*num_vertices);
@@ -880,11 +967,13 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		#endif
 	}
 	
+	
+	
 	#pragma omp barrier
 	
 	#ifdef DEBUG
 	printf("\nEnd BFS visit\n");
-	lineStr+=2;
+	lineStr+=3;
 	#endif
 	num_edges = 0;
 	
@@ -914,56 +1003,72 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	return adjMatrix;
 }
 
-__global__ void checkEdgeFromSource(Hyperarc * Edges, int num_edges, Hypervector * source, int sID,  int vertice, bool ** res, int rID, int vID){
-	int thid = threadIdx.x;
-	int thidI;
-	
-	
-	__syncthreads();
-	
-	for(int Pass=0; Pass<ceilf(num_edges/(blockDim.x))+1; Pass++){
-		thidI = thid + Pass*(blockDim.x);
-		if(thidI<num_edges){
-			if(equalHyperVectorL(Edges[thidI].from_dev, source[sID].vectors, Edges[thidI].len_fr, source[sID].len) && vID==Edges[thidI].to) {
-				//printf("(%i %i-%i %i)",thidI,Edges[thidI].to,sID,vID);
-				res[rID][vID] = true;
-			
-			}
-		}		
-	}
-	__syncthreads();
-}
-
 /*   ## GPU ##
 Create a adjacent's matrix with parallelism
+*/
+/*
+Input:
+	Vertices : list of vertices of hyper-graph
+	Edges : list of Hyperarc of hyper-graph
+	Source : list of Source of hyper-graph
+	num_vertices : number of vertices
+	num_edges : number of hyperarcs
+	num_source : number of sources
+	retMatrix : adjMatrix calculate
+!!!!!!!
+MODIFY
+	retMatrix
 */
 __global__ void succintaKernel(int *Vertices, Hyperarc * Edges, Hypervector * Source, int num_vertices, int num_edges, int num_source, bool ** retMatrix){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI;
-	int sourceID, vectorID;
 	
 	
 	if(thid==0) printf("%d %d\n",num_source,num_vertices);
 	__syncthreads();
 	
 	
-	for(int Pass=0; Pass<ceilf((num_source*num_vertices)/(gridDim.x*blockDim.x))+1; Pass++){
+	
+	for(int Pass=0; Pass<ceilf((num_edges)/(gridDim.x*blockDim.x))+1; Pass++){
 		thidI = thid + Pass*(gridDim.x*blockDim.x);
-		if(thidI<(num_source*num_vertices)){
-			sourceID = (int) (thidI / num_vertices);
-			vectorID = (int) (thidI % num_vertices);
-			
-			if(sourceID<num_source && vectorID<num_vertices){
-				checkEdgeFromSource<<<1, MAX_THREADS>>>(Edges, num_edges, Source, sourceID, Vertices[vectorID], retMatrix, sourceID, vectorID);
+		if(thidI<(num_edges)){
+			for(int i=0; i<num_source; i++){
+									
+				if(i<num_source){
+					if(equalHyperVectorL(Edges[thidI].from_dev, Source[i].vectors, Edges[thidI].len_fr, Source[i].len)) {
+						//printf("(%i %i-%i %i)",thidI,Edges[thidI].to,sID,vID);
+						retMatrix[i][Edges[thidI].to] = true;
+					
+					}
+					
 				
+				}
 			}
 		}
 	}
+	
 	__syncthreads();
 	
 	
 }
 
+
+/*   ## CPU ##
+Prepare and launch the kernel to create adjacency matrix from hyper-graph
+*/
+/*
+Input:
+	Vertices : list of vertices of hyper-graph
+	Edges : list of Hyperarc of hyper-graph
+	Set : list of Source of hyper-graph
+	num_vertices : number of vertices
+	num_edges : number of hyperarcs
+	num_source : number of sources
+Output:
+	Adjacency Matrix of hyper-graph
+!!!!!!!
+Allocate temporary copy of MatrixAdj, one in RAM and other in VRAM
+*/
 bool ** succinta(int *Vertices, Hyperarc *Edges, Hypervector *Set, int num_vertices, int num_edges, int num_source){
 	bool ** adjMatrix = (bool**) malloc(sizeof(bool*) * num_source);
 	bool ** adjMatrix_DEV;
@@ -1042,7 +1147,7 @@ bool ** succinta(int *Vertices, Hyperarc *Edges, Hypervector *Set, int num_verti
 	lineStr+=1;
 	#endif
 		
-	succintaKernel<<<1, MAX_THREADS>>>(Vertices_DEV, Edges_DEV, set_DEV, num_vertices, num_edges, num_source, adjMatrix_DEV); 
+	succintaKernel<<<MAX_BLOCKS_B, MAX_THREADS>>>(Vertices_DEV, Edges_DEV, set_DEV, num_vertices, num_edges, num_source, adjMatrix_DEV); 
 	cudaDeviceSynchronize();
 		
 	gpuErrchk(cudaGetLastError());
@@ -1145,7 +1250,7 @@ int main(int argn, char ** args){
 	#ifdef DEBUG
 	printf("reading time: %lu ms\n",durataRead);
 	lineStr++;
-	printf("CPU threads: %d\nGPU Block:%d\nGPU threads: %d\n", nThr,MAX_BLOCKS,MAX_THREADS);
+	printf("CPU threads: %d\nGPU Block:%d - %d\nGPU threads: %d\n", nThr,MAX_BLOCKS_A,MAX_BLOCKS_B,MAX_THREADS);
 	lineStr+=3;
 	#endif
 	#endif
@@ -1183,6 +1288,7 @@ int main(int argn, char ** args){
 	#ifdef DEBUG
 	lineStr++;
 	#endif
+	
 	for(int i=0; i<(num_initial); i++){
 		printf("(HV {");
 		for(int j=0; j<(*initial)[i].len; j++){
@@ -1204,13 +1310,21 @@ int main(int argn, char ** args){
 	lineStr+=2;
 	#endif
 	#endif
+	
 	#ifdef TIME
 	begin = std::chrono::high_resolution_clock::now();
 	#endif
 	
 	MatrixAdj = succinta(*Vertices, *Edges, *initial, num_vertices, num_edges, num_initial);
 	
+	#ifdef TIME
+	end = std::chrono::high_resolution_clock::now();
+	durata = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin).count();
+	begin = std::chrono::high_resolution_clock::now();
+	#endif
+	
 	#ifdef DEBUG
+	#ifndef NTAB
 	for(int i=0; i<num_initial; i++){
 		for(int j=0; j<num_vertices && (*initial)[i].real; j++)
 			printf("%d ",MatrixAdj[i][j]? 1:0);
@@ -1219,15 +1333,24 @@ int main(int argn, char ** args){
 			lineStr+=1;
 		}
 	}
+	#endif
 	#endif
 	//*Edges = gpu_bfs(*Vertices, num_vertices, Edges, num_edges, *initial, num_initial);
 
 	MatrixAdj = gpu_trans_succ(MatrixAdj, *initial, num_initial, num_vertices, num_edges);
 
+	
+	#ifdef TIME
+	end = std::chrono::high_resolution_clock::now();
+	durata += std::chrono::duration_cast<std::chrono::milliseconds>( end - begin).count();
+	#endif
+	
 	printf("\n");
 	#ifdef DEBUG
 	lineStr+=2;
 	#endif
+	#ifdef DEBUG
+	#ifndef NTAB
 	for(int i=0; i<num_initial; i++){
 		for(int j=0; j<num_vertices && (*initial)[i].real; j++)
 			printf("%d ",MatrixAdj[i][j]? 1:0);
@@ -1236,13 +1359,8 @@ int main(int argn, char ** args){
 			lineStr+=1;
 		}
 	}
-
-	#ifdef TIME
-	end = std::chrono::high_resolution_clock::now();
-	durata = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin).count();
 	#endif
-	
-	
+	#endif
 	
 	#ifdef DEBUG
 	printf("END\n");
