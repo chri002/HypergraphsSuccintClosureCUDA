@@ -518,7 +518,7 @@ __global__ void bfs_update(int len, bool * Frontier, bool * FrontierUpdate, bool
 			if(FrontierUpdate[thidI]){
 				Frontier[thidI] = true;
 				Visited[thidI] = true;
-				atomicCAS(next,0,1);
+				*next = 1;
 				FrontierUpdate[thidI] = false;
 				
 			}
@@ -526,7 +526,7 @@ __global__ void bfs_update(int len, bool * Frontier, bool * FrontierUpdate, bool
 	}
 	__syncthreads();
 	
-	if(thid==0) *end = true;
+	if(threadIdx.x==0) end[blockIdx.x] = true;
 }
 
 
@@ -641,8 +641,9 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 		if(thidI<num_source*num_vertices){
 			so = thidI/num_vertices;
 			ve = thidI%num_vertices;
-			if(adjMatrix[so][ve] && Visited[ve]==false){
-				if(includes(idVert, Sources[so].vectors, Sources[so].len)) 
+			if(adjMatrix[so][ve] && includes(idVert, Sources[so].vectors, Sources[so].len)) 
+				if(Visited[ve]==false){
+			
 						Cost[ve] = Cost[idVert]+1;
 						FrontierUpdate[ve] = true;
 					}		
@@ -683,16 +684,23 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 		thidI = thid + Pass*(gridDim.x*blockDim.x);
 	
 		if(thidI < num_vertices)
-			if(Frontier[thidI]){
+			if(Frontier[thidI]==true){
 				Frontier[thidI]=false;
 				Visited[thidI]=true;
 				neighOp_M<<<1, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source);
 			}
 	}
 	__syncthreads();
-	if(thid==0) *end = true;
+	if(threadIdx.x==0) end[blockIdx.x] = true;
 }
 
+
+__device__ bool multiAND(bool * arr, int len){
+	bool ok=true;
+	for(int i=0; i<len && ok; i++)
+		ok = ok && arr[i];
+	return ok;
+}
 
 
 /*   ## GPU ##
@@ -722,17 +730,21 @@ __global__ void bfs_main_kernel(bool ** adjMatrix, bool * Frontier,bool * Fronti
 	
 	*next = 1;
 	while(*next==1){
-		*next = 0;
-		*end = false;
+		next[0] = 0;
+		for(int i=0; i<MAX_BLOCKS_A; i++) end[i]=false;
+		
+		
 		bfs_M<<<MAX_BLOCKS_A, min(num_vertices, MAX_THREADS) >>>(adjMatrix, num_vertices, num_source, Frontier, FrontierUpdate, Visited, Cost, Set, end);
-		while(!*end){
+		while(!multiAND(end,MAX_BLOCKS_A)){
 			printf("");			
 		}
-		*end=false;
+		
+		for(int i=0; i<MAX_BLOCKS_A; i++) end[i]=false;
+		
 		
 		bfs_update<<<MAX_BLOCKS_A, min(num_vertices, MAX_THREADS) >>>(num_vertices, Frontier, FrontierUpdate, Visited, next, end);
-		while(!*end){
-			printf("");			
+		while(!multiAND(end,MAX_BLOCKS_A)){
+			printf("b");			
 		}
 		
 	}
@@ -756,7 +768,7 @@ Output:
 
 */
 bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV, int num_vertices, int num_source, int sourceStart){
-	bool * ret,* end;
+	bool * ret, *end;
 				
 	int * Cost_HOS, *Cost_DEV;
 	bool * Frontier_HOS, *Frontier_DEV;
@@ -780,7 +792,7 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 	
 	gpuErrchk(cudaMalloc((void**) &next_DEV, sizeof(int)));	
 	
-	gpuErrchk(cudaMalloc((void**)&end, sizeof(bool)));
+	gpuErrchk(cudaMalloc((void**)&end, sizeof(bool)*MAX_BLOCKS_A));
 	
 	
 	gpuErrchk(cudaGetLastError());
@@ -819,6 +831,7 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 	
 		
 	bfs_main_kernel<<<1,1>>>(adjMatrix_DEV, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV, next_DEV, num_source, num_vertices,end);
+	cudaDeviceSynchronize();
 	gpuErrchk(cudaGetLastError());
 	
 	cudaMemcpy(Cost_HOS, Cost_DEV, sizeof(int)*num_vertices, cudaMemcpyDeviceToHost);
