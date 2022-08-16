@@ -744,7 +744,7 @@ __global__ void bfs_main_kernel(bool ** adjMatrix, bool * Frontier,bool * Fronti
 		
 		bfs_update<<<MAX_BLOCKS_A, min(num_vertices, MAX_THREADS) >>>(num_vertices, Frontier, FrontierUpdate, Visited, next, end);
 		while(!multiAND(end,MAX_BLOCKS_A)){
-			printf("b");			
+			printf("");			
 		}
 		
 	}
