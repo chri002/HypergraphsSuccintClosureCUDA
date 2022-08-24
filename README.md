@@ -15,10 +15,11 @@ The succint closure on hypergraphs, with multi-threading on CUDA and openMP
 
 ## Installation:
 it needs the NVIDIA toolkit to compile, and an NVIDIA graphics card to run.<br />
-Copy all file in a folder, if you are using a windows PC run compiler.bat to compile various combinations of executables, otherwise from the console run the commands as follows.
+Copy all file in a folder, if you are using a windows PC run _compiler.bat_ to compile various combinations of executables, otherwise from the console run the commands as follows.
 
 ### Hypergraph generator
 &emsp;\nvcc .\generator.cpp -o generator.exe <br />
+
 ### Succinct transitive closure of hypergraphs
 &emsp;nvcc -rdc=true -lineinfo -std=c++17 -Xcompiler -openmp .\progetto.cu -o progetto.exe <br />
 &emsp;&emsp;-D HIDE  : hide the output of graph# <br />
