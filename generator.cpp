@@ -4,13 +4,7 @@
 #				  hypergraph generator 						#
 #			nvcc .\generator.cpp -o generator.exe			#
 #			 cl .\generator.cpp -o generator.exe			#
-#					-v <number of vertices>					#
-#					-e <number of edges>					#
-#					-s <number of supersets>				#
-#					-l -v <n.v.>: line graphs				#
-#					-l -c -v <n.v.>: line graphs cyclic		#
-#					-o -v <n.v.>: complete graphs 			#
-#					-r <n.v.>: remove n.v. vertices			#
+#															#
 #############################################################
 */
 
@@ -46,6 +40,8 @@ int main(int argn, char ** argvs){
 			sphere = true;
 		if(str.substr(0,2)=="-r")
 			remove = std::atoi(argvs[i+1]);
+		if(str.substr(0,3)=="--h")
+			printf("Generator of hypergraph\n  generator.exe <option>\n\nOptions:\n\t-v <number of vertices>\n\t-e <number of edges>\n\t-s <number of supersets>\n\t-l -v <n.v.>: line graphs\n\t-l -c -v <n.v.>: line graphs cyclic\n\t-o -v <n.v.>: complete graphs\n\t-r <n.v.>: remove n.v. vertices");
 	}
 	
 	if(line){
