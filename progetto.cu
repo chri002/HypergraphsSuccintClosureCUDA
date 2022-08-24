@@ -1226,9 +1226,9 @@ int main(int argn, char ** args){
 				argg=true;
 			}
 			else
-				if(std::string(args[i].substr(0,3) == "--h"){
+				if(std::string(args[i]).substr(0,3) == "--h"){
 					printf("Succinct transitive closure of hypergraphs\n  progetto.exe <option> <name of graphs>\n\nOption:\n\t-nT <number of CPU Threads>");
-				}else if(std::string(args[i].substr(0,2) == "-o"){
+				}else if(std::string(args[i]).substr(0,2) == "-o"){
 					file_name = args[i+1];
 					thName = true;
 				}else if(!thName)
