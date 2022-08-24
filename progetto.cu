@@ -1216,7 +1216,7 @@ int main(int argn, char ** args){
 	int  num_edges_init=0, num_real_initial=0;
 	#endif 
 	#endif
-	bool argg=false;
+	bool argg=false,thName=false;
 	std::string file_name="                    ";
 	
 	if(argn>1){
@@ -1225,8 +1225,14 @@ int main(int argn, char ** args){
 				nThr = std::stoi(std::string(args[i]).substr(4));
 				argg=true;
 			}
-			else 
-				file_name = args[i];
+			else
+				if(std::string(args[i].substr(0,3) == "--h"){
+					printf("Succinct transitive closure of hypergraphs\n  progetto.exe <option> <name of graphs>\n\nOption:\n\t-nT <number of CPU Threads>");
+				}else if(std::string(args[i].substr(0,2) == "-o"){
+					file_name = args[i+1];
+					thName = true;
+				}else if(!thName)
+					file_name = args[i];
 		if(!argg){
 			#ifndef NTHR
 				#pragma omp parallel shared(nThr)
