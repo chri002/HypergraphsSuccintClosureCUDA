@@ -933,6 +933,8 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		int num_att=0;
 				
 		from[omp_get_thread_num()] = 0;
+		if(omp_get_thread_num()==nThr-1) ex = num_source;
+		if(ex!=sx+work_x_thr) work_x_thr = ex-sx;
 		
 		#ifdef DEBUG
 		printf("thread %d: %d-%d (%d)\n",omp_get_thread_num(),sx,ex,work_x_thr);
@@ -940,7 +942,6 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		lineStr+=1;
 		#endif
 		
-		if(omp_get_thread_num()==nThr-1) ex = num_source;
 		
 		#pragma omp barrier
 		for(int i=sx; i<ex; i++){
@@ -980,6 +981,9 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		#endif
 	}
 	
+	#ifdef DEBUG
+	printf("\033[%d;1HCompletato %d/%d                                                                ",lineStr,totOp,nThr);
+	#endif
 	
 	
 	#pragma omp barrier
