@@ -38,7 +38,7 @@ Work:
 	
 Experimental:
 	inside copyaa add comment around std::copy and compile without -std c++17 
-	end uncomment the openmp for cycle 
+	end uncomment the normal copy
 	
 */
 
