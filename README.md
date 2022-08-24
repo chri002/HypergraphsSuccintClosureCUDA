@@ -13,6 +13,31 @@ The succint closure on hypergraphs, with multi-threading on CUDA and openMP
 	<li>GPU parallelism: the BFS to find all the grandchildren of the node.</li>
 	</ul>
 
+## Installation:
+it needs the NVIDIA toolkit to compile, and an NVIDIA graphics card to run.<br />
+Copy all file in a folder, if you are using a windows PC run compiler.bat to compile various combinations of executables, otherwise from the console run the commands as follows.
+
+### Hypergraph generator
+&emsp;\nvcc .\generator.cpp -o generator.exe <br />
+### Succinct transitive closure of hypergraphs
+&emsp;nvcc -rdc=true -lineinfo -std=c++17 -Xcompiler -openmp .\progetto.cu -o progetto.exe <br />
+&emsp;&emsp;-D HIDE  : hide the output of graph# <br />
+&emsp;&emsp;-D DEBUG : show information on runtime <br />
+&emsp;&emsp;-D FILE_OUT : export graph to file <br />
+&emsp;&emsp;-D MAX_THREADS : max cuda threads <br />
+&emsp;&emsp;-D MAX_BLOCKS_A : max cuda blocks BFS <br />
+&emsp;&emsp;-D MAX_BLOCKS_AI : max cuda blocks BFS inside <br />
+&emsp;&emsp;-D MAX_BLOCKS_B : max cuda blocks succintion <br />
+&emsp;&emsp;-D TIME : enable time control <br />
+&emsp;&emsp;-D NO_INPUT : remove enter click <br />
+&emsp;&emsp;-D NTHR : number of cpu threads <br />
+&emsp;&emsp;-D NTAB : hide the succinted graph outupt <br />
+&emsp;&emsp;-D NO_DOUBLE : to use original BFS CUDA <br />
+
 ## Work:
-progetto.exe "grafo.txt" <br />
-(PRESS ENTER WHEN REQUEST)
+At begin generate the hypergraphs with _generator_ and then lunch _progetto_<br />
+
+&emsp;&emsp;generator.exe -v &lt;number of vertices&gt; -e &lt;number of edges&gt; -s &lt;number of supersets&gt;<br />
+
+&emsp;&emsp;progetto.exe "grafo.txt" <br />
+&emsp;&emsp;(PRESS ENTER WHEN REQUEST)
