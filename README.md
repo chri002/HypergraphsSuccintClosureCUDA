@@ -24,16 +24,16 @@ Copy all file in a folder, if you are using a windows PC run _compiler.bat_ to c
 &emsp;nvcc -rdc=true -lineinfo -std=c++17 -Xcompiler -openmp .\progetto.cu -o progetto.exe <br />
 &emsp;&emsp;-D HIDE  : hide the output of graph# <br />
 &emsp;&emsp;-D DEBUG : show information on runtime <br />
-&emsp;&emsp;-D FILE_OUT : export graph to file <br />
-&emsp;&emsp;-D MAX_THREADS : max cuda threads <br />
-&emsp;&emsp;-D MAX_BLOCKS_A : max cuda blocks BFS <br />
-&emsp;&emsp;-D MAX_BLOCKS_AI : max cuda blocks BFS inside <br />
-&emsp;&emsp;-D MAX_BLOCKS_B : max cuda blocks succintion <br />
+&emsp;&emsp;-D FILE_OUT <value> : export graph to file <br />
+&emsp;&emsp;-D MAX_THREADS <value> : max cuda threads <br />
+&emsp;&emsp;-D MAX_BLOCKS_A <value> : max cuda blocks BFS <br />
+&emsp;&emsp;-D MAX_BLOCKS_AI <value> : max cuda blocks BFS inside <br />
+&emsp;&emsp;-D MAX_BLOCKS_B <value> : max cuda blocks succintion <br />
+&emsp;&emsp;-D NTHR <value> : number of cpu threads <br />
 &emsp;&emsp;-D TIME : enable time control <br />
 &emsp;&emsp;-D NO_INPUT : remove enter click <br />
-&emsp;&emsp;-D NTHR : number of cpu threads <br />
 &emsp;&emsp;-D NTAB : hide the succinted graph outupt <br />
-&emsp;&emsp;-D NO_DOUBLE : to use original BFS CUDA <br />
+&emsp;&emsp;-D NO_DOUBLE : to use only external parallelization BFS CUDA  <br />
 
 ## Work:
 At begin generate the hypergraphs with _generator_ and then lunch _progetto_<br />
