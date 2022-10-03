@@ -32,7 +32,7 @@ Calculation of the succinct transitive closure given a hypergraph H, in a parall
 		obtained from the BFS.
 	GPU parallelism: the BFS to find all the grandchildren of the node.
 Compile example:
-	nvcc -rdc=true -D FILE_OUT -D DEBUG  -D MAX_THREADS=1024 -D MAX_BLOCKS_A=4 -D MAX_BLOCKS_A1=4 -D MAX_BLOCKS_B=16 -D TIME -D HIDE -D NO_INPUT -D NTAB -std=c++17 -lineinfo -Xcompiler -openmp -Xlinker /HEAP:0x8096 .\progetto.cu -o .\eseguibile\progetto.exe
+	nvcc -rdc=true -D FILE_OUT -D DEBUG  -D MAX_THREADS=1024 -D MAX_BLOCKS_A=4 -D MAX_BLOCKS_AI=4 -D MAX_BLOCKS_B=16 -D TIME -D HIDE -D NO_INPUT -D NTAB -std=c++17 -lineinfo -Xcompiler -openmp -Xlinker /HEAP:0x8096 .\progetto.cu -o .\eseguibile\progetto.exe
 Work:
 	progetto.exe "grafo.txt"
 	
