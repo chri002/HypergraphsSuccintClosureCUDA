@@ -624,7 +624,7 @@ Input:
 MODIFY:
 	Cost, FrontierUpdate
 */
-__global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, int num_source){
+__global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, int num_source, bool ** supMat_DEV){
 	int thid = (blockIdx.x*blockDim.x)+threadIdx.x;
 	int thidI;
 	int so, ve;
@@ -635,7 +635,7 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 		if(thidI<num_source*num_vertices){
 			so = thidI/num_vertices;
 			ve = thidI%num_vertices;
-			if(adjMatrix[so][ve] && includes(idVert, Sources[so].vectors, Sources[so].len)) 
+			if(adjMatrix[so][ve] && supMat_DEV[idVert][so]) 
 				if(Visited[ve]==false || Cost[ve]==0){
 			
 						Cost[ve] = Cost[idVert]+1;
@@ -668,7 +668,7 @@ MODIFY:
 	Cost, FrontierUpdate, Frontier, Visited, end
 */
 
-__global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources){
+__global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, bool ** supMat_DEV){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI;
 	
@@ -687,13 +687,13 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 				Visited[thidI]=true;
 				
 				#ifndef NO_DOUBLE
-				neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source);
+				neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source, supMat_DEV);
 				#else
 					for(int NN=0; NN<((num_source*num_vertices)); NN++){
 		
 						so = NN/num_vertices;
 						ve = NN%num_vertices;
-						if(adjMatrix[so][ve] && includes(thidI, Sources[so].vectors, Sources[so].len)) 
+						if(adjMatrix[so][ve] && supMat_DEV[ve][so]) 
 							if(Visited[ve]==false || Cost[ve]==0){
 						
 									Cost[ve] = Cost[thidI]+1;
@@ -724,7 +724,7 @@ Output:
 	list of node visited
 
 */
-bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV, int num_vertices, int num_source, int sourceStart, bool TOK){
+bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV, int num_vertices, int num_source, int sourceStart, bool TOK, bool ** supMat_DEV){
 	bool * ret;
 				
 	int * Cost_HOS, *Cost_DEV;
@@ -804,12 +804,12 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 		gpuErrchk(cudaMemcpy(next_DEV, &next_HOS, sizeof(int), cudaMemcpyHostToDevice));
 		
 		
-		bfs_M<<<MAX_BLOCKS_A, min(num_vertices, MAX_THREADS) >>>(adjMatrix_DEV, num_vertices, num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV);
+		bfs_M<<<MAX_BLOCKS_A, (MAX_THREADS) >>>(adjMatrix_DEV, num_vertices, num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV, supMat_DEV);
 		cudaDeviceSynchronize();
 		gpuErrchk(cudaGetLastError());
 	
 				
-		bfs_update<<<MAX_BLOCKS_A, min(num_vertices, MAX_THREADS) >>>(num_vertices, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, next_DEV);
+		bfs_update<<<MAX_BLOCKS_A, (MAX_THREADS) >>>(num_vertices, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, next_DEV);
 		cudaDeviceSynchronize();
 		gpuErrchk(cudaGetLastError());
 	
@@ -860,7 +860,7 @@ MULTI PARALLELISM OPENMP
 !!!!!!
 Allocate temporary copy of MatrixAdj, one in RAM and other in VRAM
 */
-bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int num_vertices, int &num_edges){
+bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int num_vertices, int &num_edges, bool ** supMat_DEV){
 	bool ** adjMatrix;
 	bool ** adjMatrix_DEV;
 	
@@ -947,7 +947,7 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		for(int i=sx; i<ex; i++){
 			if((Set[i].real)){
 				num_att = i;
-				fromb = gpu_bfs_suc(adjMatrix_DEV, Set, set_DEV, num_vertices, num_source, num_att, omp_get_thread_num()==0); 
+				fromb = gpu_bfs_suc(adjMatrix_DEV, Set, set_DEV, num_vertices, num_source, num_att, omp_get_thread_num()==0, supMat_DEV); 
 				
 				t_num_edges = 0;
 				
@@ -972,7 +972,7 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 			#endif
 			
 		}
-		
+					
 		#ifdef DEBUG
 		completo+=" "+std::to_string(omp_get_thread_num());
 		#pragma omp atomic
@@ -982,9 +982,8 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	}
 	
 	#ifdef DEBUG
-	printf("\033[%d;1HCompletato %d/%d                                                                ",lineStr,totOp,nThr);
+	printf("\033[%d;1HCompletato %d/%d                                                                        ",lineStr,totOp,nThr);
 	#endif
-	
 	
 	#pragma omp barrier
 	
@@ -1016,6 +1015,8 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	
 	return adjMatrix;
 }
+
+
 
 /*   ## GPU ##
 Create a adjacent's matrix with parallelism
@@ -1063,7 +1064,6 @@ __global__ void succintaKernel(int *Vertices, Hyperarc * Edges, Hypervector * So
 	
 	
 }
-
 
 /*   ## CPU ##
 Prepare and launch the kernel to create adjacency matrix from hyper-graph
@@ -1194,6 +1194,151 @@ bool ** succinta(int *Vertices, Hyperarc *Edges, Hypervector *Set, int num_verti
 }
 
 
+/*   ## GPU ##
+Create a node-source support matrix with parallelism
+*/
+/*
+Input:
+	Vertices : list of vertices of hyper-graph
+	Source : list of Source of hyper-graph
+	num_vertices : number of vertices
+	num_source : number of sources
+	retMatrix : adjMatrix calculate
+!!!!!!!
+MODIFY
+	retMatrix
+*/
+__global__ void succintaKernel(int *Vertices, Hypervector * Source, int num_vertices, int num_source, bool ** retMatrix){
+	int thid = blockIdx.x * blockDim.x + threadIdx.x;
+	int thidI;
+	
+	
+	__syncthreads();
+	
+	
+	
+	for(int Pass=0; Pass<ceilf((num_vertices)/(gridDim.x*blockDim.x))+1; Pass++){
+		thidI = thid + Pass*(gridDim.x*blockDim.x);
+		if(thidI<(num_vertices)){
+			for(int i=0; i<num_source; i++){
+									
+				if(i<num_source){
+					if(includes(thidI, Source[i].vectors, Source[i].len)) {
+						retMatrix[thidI][i] = true;
+					
+					}else
+						retMatrix[thidI][i] = false;
+				
+				}
+			}
+		}
+	}
+	
+	__syncthreads();
+	
+	
+}
+
+
+/*   ## CPU ##
+Prepare and launch the kernel to create support matrix from hyper-graph
+*/
+/*
+Input:
+	Vertices : list of vertices of hyper-graph
+	Set : list of Source of hyper-graph
+	num_vertices : number of vertices
+	num_source : number of sources
+Output:
+	support Matrix of hyper-graph on CUDA
+!!!!!!!
+Allocate temporary copy of supMat, one in RAM and other in VRAM
+!!!!!!!
+VRAM address pointer
+*/
+bool ** preProcess(int *Vertices, Hypervector *Set, int num_vertices,int num_source){
+	bool ** supMat = (bool**) malloc(sizeof(bool*) * num_vertices);
+	bool ** supMat_DEV;
+	
+	Hypervector * set_DEV, * set_HOS;
+	
+	int * Vertices_DEV;
+	int * from;
+	
+	printf("Support Matrix operation start\n");
+	#ifdef DEBUG
+	lineStr+=1;
+	#endif
+	
+	gpuErrchk(cudaMalloc((void**) &supMat_DEV, sizeof(bool*) * num_vertices));
+
+	gpuErrchk(cudaGetLastError());
+	for(int i=0; i<num_vertices; i++){
+		gpuErrchk(cudaMalloc(&supMat[i], sizeof(bool)*num_source));
+	}
+	
+	gpuErrchk(cudaGetLastError());
+	
+	cudaMemcpy(supMat_DEV, supMat, sizeof(bool*)*num_vertices, cudaMemcpyHostToDevice);
+	
+	gpuErrchk(cudaGetLastError());
+	
+	
+	gpuErrchk(cudaMalloc((void**)&Vertices_DEV, sizeof(int)*num_vertices));
+	gpuErrchk(cudaMalloc((void**)&set_DEV, sizeof(Hypervector)*num_source));
+	
+	set_HOS = (Hypervector*) malloc(sizeof(Hypervector)*num_source);
+	
+	cudaMemcpy(Vertices_DEV, Vertices, sizeof(int)*num_vertices, cudaMemcpyHostToDevice);
+	
+	
+	gpuErrchk(cudaGetLastError());
+	
+	int len_frT = 0;
+	for(int i=0; i<num_source; i++){	
+		len_frT = (Set)[i].len;
+		gpuErrchk(cudaMalloc((void**)&from, sizeof(int) * len_frT));
+		
+		gpuErrchk(cudaMemcpy(from, (Set)[i].vectors, sizeof(int)* len_frT, cudaMemcpyHostToDevice));
+		
+		
+		(set_HOS)[i].vectors = from;
+		set_HOS[i].len = Set[i].len;
+	}	
+	gpuErrchk(cudaMemcpy(set_DEV, set_HOS, sizeof(Hypervector)*num_source, cudaMemcpyHostToDevice));
+	
+	free(set_HOS);
+	
+	gpuErrchk(cudaGetLastError());
+		
+	printf("Prepare all\n");
+	#ifdef DEBUG
+	lineStr+=1;
+	#endif
+		
+	succintaKernel<<<MAX_BLOCKS_B, MAX_THREADS>>>(Vertices_DEV, set_DEV, num_vertices, num_source, supMat_DEV); 
+	cudaDeviceSynchronize();
+		
+	gpuErrchk(cudaGetLastError());
+	
+	
+	printf("preprocessed\n");
+	#ifdef DEBUG
+	lineStr+=1;
+	#endif
+	cudaMemcpy(supMat, supMat_DEV, sizeof(bool)* num_vertices, cudaMemcpyDeviceToHost);
+	gpuErrchk(cudaGetLastError());
+	
+	
+	
+	gpuErrchk(cudaFree(Vertices_DEV));
+	gpuErrchk(cudaFree(set_DEV));
+	gpuErrchk(cudaGetLastError());
+		
+	return supMat_DEV;
+}
+
+
 /*   ## CPU ##
 main function
 read graph and initialize it, lunch gpu_bfs, write graphs
@@ -1211,7 +1356,7 @@ int main(int argn, char ** args){
 	Hypervector** initial = (Hypervector**) malloc(sizeof(Hypervector*));
 	int ** Vertices		  = (int**) malloc(sizeof(int*));
 	
-	bool ** MatrixAdj;
+	bool ** MatrixAdj, **supMat;
 	
 	int num_vertices=0, num_edges=0, num_initial=0;
 	
@@ -1344,6 +1489,7 @@ int main(int argn, char ** args){
 	#endif
 	
 	MatrixAdj = succinta(*Vertices, *Edges, *initial, num_vertices, num_edges, num_initial);
+	supMat = preProcess(*Vertices, *initial, num_vertices, num_initial);
 	
 	#ifdef TIME
 	end = std::chrono::high_resolution_clock::now();
@@ -1361,10 +1507,13 @@ int main(int argn, char ** args){
 			lineStr+=1;
 		}
 	}
+	printf("\n\n");
+	lineStr+=2;
+	
 	#endif
 	#endif
 	
-	MatrixAdj = gpu_trans_succ(MatrixAdj, *initial, num_initial, num_vertices, num_edges);
+	MatrixAdj = gpu_trans_succ(MatrixAdj, *initial, num_initial, num_vertices, num_edges, supMat);
 
 	
 	#ifdef TIME
