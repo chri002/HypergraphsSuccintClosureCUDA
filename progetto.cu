@@ -36,9 +36,6 @@ Compile example:
 Work:
 	progetto.exe "grafo.txt"
 	
-Experimental:
-	inside copyaa add comment around std::copy and compile without -std c++17 
-	end uncomment the normal copy
 	
 */
 
@@ -47,13 +44,14 @@ Experimental:
 #include <omp.h>
 #include <vector>
 #include <string>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <istream>
 #include <fstream>
 #include <algorithm>
-#include <chrono>
 #include <execution>
+#include <chrono>
 #include <map>
 #include <utility>
 
@@ -101,6 +99,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
       if (abort) exit(code);
    }
 }
+
 
 
 //Struttura iperarco
@@ -496,7 +495,6 @@ __device__ bool equalHyperVectorL(int * hyperarcs, int * vectors, int len1, int 
 	return ok;
 }
 
-
 /*   ## GPU ##
 Update the ausiliary structur of BFS
 */
@@ -552,11 +550,15 @@ MODIFY:
 	a
 */
 int copyaa(Hyperarc* a, Hyperarc* b, int w){
-	
-	//std::memcpy(a,b,w*sizeof(Hyperarc));
-	
-	//using std c++17
-	std::copy(std::execution::par,b,b+w,a);
+
+	//using std 
+	#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
+	//##c++17##
+		std::copy(std::execution::par, b, b+w, a);
+	#else
+	//##c++13##
+		std::memcpy(a,b,w*sizeof(Hyperarc));
+	#endif
 	
 	std::sort(a, a + w, compareTwoHyerarch);
 	auto discard=std::unique( a, a + w , ne_compareTwoHyerarch);
@@ -579,10 +581,16 @@ MODIFY:
 */
 int copyaa(Hypervector* a, Hypervector* b, int w){
 	
-	//std::memcpy(a,b,w*sizeof(Hypervector));
 	
-	//using std c++17
-	std::copy(std::execution::par,b,b+w,a);
+	//using std 
+	#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
+		//##c++17##
+		std::copy(std::execution::par, b, b+w, a);
+	#else
+		//##c++13##
+		std::memcpy(a,b,w*sizeof(Hypervector));
+	#endif
+	
 	
 	return 0;
 }
@@ -1178,7 +1186,15 @@ bool ** succinta(int *Vertices, Hyperarc *Edges, Hypervector *Set, int num_verti
 		cudaMemcpy(fromb,adjMatrix[i], sizeof(bool)* num_vertices, cudaMemcpyDeviceToHost);
 	
 		adjMatrix[i] = (bool*) malloc(sizeof(bool)*num_vertices);
-		std::copy(std::execution::par,fromb,fromb+num_vertices,adjMatrix[i]);	
+		//using std
+		#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
+			//##c++17##
+			std::copy(std::execution::par, fromb, fromb+num_vertices, adjMatrix[i]);
+		#else
+			//##c++13##
+			std::memcpy(adjMatrix[i],fromb,(num_vertices)*sizeof(bool));
+		#endif
+		
 	}
 	
 	
@@ -1208,7 +1224,7 @@ Input:
 MODIFY
 	retMatrix
 */
-__global__ void succintaKernel(int *Vertices, Hypervector * Source, int num_vertices, int num_source, bool ** retMatrix){
+__global__ void prePropKernel(int *Vertices, Hypervector * Source, int num_vertices, int num_source, bool ** retMatrix){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI;
 	
@@ -1316,7 +1332,7 @@ bool ** preProcess(int *Vertices, Hypervector *Set, int num_vertices,int num_sou
 	lineStr+=1;
 	#endif
 		
-	succintaKernel<<<MAX_BLOCKS_B, MAX_THREADS>>>(Vertices_DEV, set_DEV, num_vertices, num_source, supMat_DEV); 
+	prePropKernel<<<MAX_BLOCKS_B, MAX_THREADS>>>(Vertices_DEV, set_DEV, num_vertices, num_source, supMat_DEV); 
 	cudaDeviceSynchronize();
 		
 	gpuErrchk(cudaGetLastError());
@@ -1351,6 +1367,13 @@ Input:
 int main(int argn, char ** args){
 	
 	system("cls");
+	#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
+		printf("C++17\n");
+	#ifdef DEBUG
+		lineStr+=1;
+	#endif
+    #endif
+	
 	
 	Hyperarc** Edges	  = (Hyperarc**) malloc(sizeof(Hyperarc*));
 	Hypervector** initial = (Hypervector**) malloc(sizeof(Hypervector*));
