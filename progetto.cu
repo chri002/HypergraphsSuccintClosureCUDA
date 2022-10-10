@@ -707,7 +707,7 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 		
 						so = NN/num_vertices;
 						ve = NN%num_vertices;
-						if(adjMatrix[so][ve] && supMat_DEV[ve][so]) 
+						if(adjMatrix[so][ve] && supMat_DEV[thidI][so]) 
 							if(Visited[ve]==false || Cost[ve]==0){
 						
 									Cost[ve] = Cost[thidI]+1;
@@ -884,8 +884,9 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	Hypervector * set_DEV, * set_HOS;
 	
 	int len_frT, sum=0;
-	int totOp, totSo;
-	
+	#ifdef DEBUG
+		int totOp, totSo;
+	#endif
 	std::string completo = "";
 	
 	#ifdef TIME
@@ -936,11 +937,11 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	#ifdef DEBUG
 		lineStr+=1;
 	#endif
-	
-	totOp=0;
-	totSo=0;
-	
-	#pragma omp parallel shared(adjMatrix_DEV, adjMatrix, set_DEV,Set, from, num_vertices, num_source, completo, totOp, totSo) private(fromb) num_threads(nThr)
+	#ifdef DEBUG	
+		#pragma omp parallel shared(adjMatrix_DEV, adjMatrix, set_DEV,Set, from, num_vertices, num_source, completo, totOp, totSo) private(fromb) num_threads(nThr)
+	#else
+		#pragma omp parallel shared(adjMatrix_DEV, adjMatrix, set_DEV,Set, from, num_vertices, num_source, completo) private(fromb) num_threads(nThr)
+	#endif
 	{
 		int work_x_thr  = ceil(num_source/(nThr));
 		int sx 		    = omp_get_thread_num() * work_x_thr;
@@ -990,10 +991,10 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		}
 					
 		#ifdef DEBUG
-		completo+=" "+std::to_string(omp_get_thread_num());
-		#pragma omp atomic
-		totOp+=1;
-		printf("\033[%d;1HCompletato %d/%d  (%s ) [%d/%d]           ",lineStr,totOp,nThr,completo.c_str(),totSo,num_source);
+			completo+=" "+std::to_string(omp_get_thread_num());
+			#pragma omp atomic
+			totOp+=1;
+			printf("\033[%d;1HCompletato %d/%d  (%s ) [%d/%d]           ",lineStr,totOp,nThr,completo.c_str(),totSo,num_source);
 		#endif
 	}
 	
@@ -1001,10 +1002,7 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	printf("\033[%d;1HCompletato %d/%d                                                                        ",lineStr,totOp,nThr);
 	#endif
 	
-	
-	totOp=0;
-	totSo=0;
-	
+		
 	#pragma omp barrier
 	
 	#ifdef DEBUG
@@ -1455,8 +1453,8 @@ int main(int argn, char ** args){
 	
 	#ifdef TIME
 		durataRead = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin ).count();
+		printf("reading time: %lu ms\n",durataRead);
 		#ifdef DEBUG
-			printf("reading time: %lu ms\n",durataRead);
 			lineStr+=1;
 		#endif
 	#endif
@@ -1577,18 +1575,17 @@ int main(int argn, char ** args){
 		}
 	#endif
 	
+	printf("\nEnd transitive operation\n");
 	#ifdef DEBUG
-		printf("END\n");
-		lineStr++;
-	
-		#ifdef TIME 
-			durata = durataRead+durataSucc+durataClos;
-			printf("::durata: %lu ms\n",durata);
+		lineStr+=2;
+	#endif
+	#ifdef TIME 
+		durata = durataRead+durataSucc+durataClos;
+		printf("::durata totale: %lu ms\n",durata);
+		#ifdef DEBUG
 			lineStr++;
 		#endif
-		
 	#endif
-	
 	
 	#ifdef FILE_OUT
 		printf("Writing on file");
