@@ -2,14 +2,14 @@
 #########################################################################################
 #																						#
 #	    	  			    hypergraph transitive closure 								#
-# nvcc -rdc=true -lineinfo -std=c++17 -Xcompiler -openmp .\progetto.cu -o progetto.exe	#
+#       nvcc -rdc=true -lineinfo -Xcompiler -openmp .\progetto.cu -o progetto.exe    	#
 #			 			-D HIDE  : hide the output of graph								#
 #			 			-D DEBUG : show information on runtime							#
 #			 			-D FILE_OUT : export graph to file								#
 #			 			-D MAX_THREADS : max cuda threads 								#
 #			 			-D MAX_BLOCKS_A : max cuda blocks BFS							#
 #			 			-D MAX_BLOCKS_AI : max cuda blocks BFS inside					#
-#			 			-D MAX_BLOCKS_B : max cuda blocks succintion					#
+#			 			-D MAX_BLOCKS_B : max cuda blocks for preprocessing				#
 #			 			-D TIME : enable time control	 								#
 #			 			-D NO_INPUT : remove enter clic 								#
 #			 			-D NTHR : number of cpu threads 								#
@@ -36,6 +36,10 @@ Compile example:
 Work:
 	progetto.exe "grafo.txt"
 	
+std version:
+	std::c++17 implementation with parallel copy 
+	std::c++98 memcpy sequential
+	
 	
 */
 
@@ -50,11 +54,13 @@ Work:
 #include <istream>
 #include <fstream>
 #include <algorithm>
-#include <execution>
 #include <chrono>
 #include <map>
 #include <utility>
 
+#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
+	#include <execution>
+#endif
 //Massimo numero di threads su GPU e Block su GPU e poi su CPU
 
 //GPU
@@ -62,13 +68,13 @@ Work:
 #define MAX_THREADS 128
 #endif
 #ifndef MAX_BLOCKS_A
-#define MAX_BLOCKS_A 1
+#define MAX_BLOCKS_A 2
 #endif
 #ifndef MAX_BLOCKS_AI
-#define MAX_BLOCKS_AI 1
+#define MAX_BLOCKS_AI 2
 #endif
 #ifndef MAX_BLOCKS_B
-#define MAX_BLOCKS_B 1
+#define MAX_BLOCKS_B 4
 #endif
 //CPU
 #ifdef NTHR
@@ -78,14 +84,14 @@ Work:
 #endif
 
 #ifdef TIME
-std::chrono::high_resolution_clock::time_point begin, begin1;
-std::chrono::high_resolution_clock::time_point end, end1;
-unsigned long durata,durataClos,durataRead,durataSucc,durataMemory,durataMemoryT;
+	std::chrono::high_resolution_clock::time_point begin, begin1;
+	std::chrono::high_resolution_clock::time_point end, end1;
+	unsigned long durata,durataClos,durataRead,durataSucc,durataMemory,durataMemoryT;
 
 #endif
 
 #ifdef DEBUG
-int lineStr=1;
+	int lineStr=1;
 #endif
 
 
@@ -206,7 +212,7 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 				
 				printf("OK\n");
 				#ifdef DEBUG
-				lineStr++;
+					lineStr++;
 				#endif
 			}else if(pref == "SUC"){
 				temp  = line.find(",")+1;
@@ -379,7 +385,7 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 		file_graph.close();
 		printf("Superset: %d ok\n",num_initial);
 		#ifdef DEBUG
-		lineStr++;
+			lineStr++;
 		#endif
 		
 	}
@@ -407,7 +413,7 @@ void writeGraph(bool** matrixSuc, int num_vertices, Hypervector* Sources, int nu
 	myFile.open(FILE);
 	myFile << "SUC " << num_vertices <<"," << num_source_real << "," << num_edges << "," << num_source << "\n";
 	#ifdef DEBUG
-	lineStr++;
+		lineStr++;
 	#endif
 	for(int i=0; i<num_source; i++){
 		if(Sources[i].real){
@@ -440,20 +446,20 @@ void writeGraph(bool** matrixSuc, int num_vertices, Hypervector* Sources, int nu
 
 
 #ifdef TIME
-/*   ## CPU ##
-Write operation time to file
-*/
-/*
-Input:
-	num_vertices : number of integers pointed from Vertices
-	num_edges : number of hyperarcs pointed from Edges
-*/
-void writeTime(int num_vertices, int num_edges, int num_source, int num_edge_final, int num_source_total){
-	std::ofstream myFile;
-	myFile.open("TimeSave.txt", std::fstream::app);
-	myFile << "<G ["<<MAX_BLOCKS_A<<"] ["<<MAX_BLOCKS_AI<<"] " << num_vertices <<"," << num_edges <<","<< num_source <<","<< num_edge_final<<","<< num_source_total<<" ("<<durata<<" ms),("<<durataRead<<" ms),("<<durataClos<<" ms),("<<durataMemory<<" ms),("<<durataSucc<<" ms)>\n";
-	myFile.close();
-}
+	/*   ## CPU ##
+	Write operation time to file
+	*/
+	/*
+	Input:
+		num_vertices : number of integers pointed from Vertices
+		num_edges : number of hyperarcs pointed from Edges
+	*/
+	void writeTime(int num_vertices, int num_edges, int num_source, int num_edge_final, int num_source_total){
+		std::ofstream myFile;
+		myFile.open("TimeSave.txt", std::fstream::app);
+		myFile << "<G ["<<MAX_BLOCKS_A<<"] ["<<MAX_BLOCKS_AI<<"] " << num_vertices <<"," << num_edges <<","<< num_source <<","<< num_edge_final<<","<< num_source_total<<" ("<<durata<<" ms),("<<durataRead<<" ms),("<<durataClos<<" ms),("<<durataMemory<<" ms),("<<durataSucc<<" ms)>\n";
+		myFile.close();
+	}
 #endif
 /*	## GPU ##
 Confront hyperarcs superset with node's array  
@@ -695,7 +701,7 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 				Visited[thidI]=true;
 				
 				#ifndef NO_DOUBLE
-				neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source, supMat_DEV);
+					neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source, supMat_DEV);
 				#else
 					for(int NN=0; NN<((num_source*num_vertices)); NN++){
 		
@@ -744,8 +750,8 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 	
 	
 	#ifdef TIME
-	if(TOK==0)
-		begin1 = std::chrono::high_resolution_clock::now();
+		if(TOK==0)
+			begin1 = std::chrono::high_resolution_clock::now();
 	#endif
 	Cost_HOS = (int*) malloc(sizeof(int)*num_vertices);
 	gpuErrchk(cudaMalloc((void**)&Cost_DEV, sizeof(int)*num_vertices));
@@ -798,10 +804,10 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 	gpuErrchk(cudaGetLastError());
 	
 	#ifdef TIME
-	if(TOK==0){
-		end1 = std::chrono::high_resolution_clock::now();
-		durataMemoryT = std::chrono::duration_cast<std::chrono::milliseconds>( end1 - begin1).count();
-	}
+		if(TOK==0){
+			end1 = std::chrono::high_resolution_clock::now();
+			durataMemoryT = std::chrono::duration_cast<std::chrono::milliseconds>( end1 - begin1).count();
+		}
 	#endif
 	
 	
@@ -878,12 +884,12 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	Hypervector * set_DEV, * set_HOS;
 	
 	int len_frT, sum=0;
-	int totOp=0, totSo=0;
+	int totOp, totSo;
 	
 	std::string completo = "";
 	
 	#ifdef TIME
-	begin1 = std::chrono::high_resolution_clock::now();
+		begin1 = std::chrono::high_resolution_clock::now();
 	#endif
 	
 	adjMatrix = (bool**) malloc(sizeof(bool*) * num_source);
@@ -922,15 +928,17 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	
 	
 	#ifdef TIME
-	end1 = std::chrono::high_resolution_clock::now();
-	durataMemory = std::chrono::duration_cast<std::chrono::milliseconds>( end1 - begin1).count();
+		end1 = std::chrono::high_resolution_clock::now();
+		durataMemory = std::chrono::duration_cast<std::chrono::milliseconds>( end1 - begin1).count();
 	#endif
 	
 	printf("Start BFS visit...\n");
 	#ifdef DEBUG
-	lineStr+=1;
+		lineStr+=1;
 	#endif
 	
+	totOp=0;
+	totSo=0;
 	
 	#pragma omp parallel shared(adjMatrix_DEV, adjMatrix, set_DEV,Set, from, num_vertices, num_source, completo, totOp, totSo) private(fromb) num_threads(nThr)
 	{
@@ -945,9 +953,9 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		if(ex!=sx+work_x_thr) work_x_thr = ex-sx;
 		
 		#ifdef DEBUG
-		printf("thread %d: %d-%d (%d)\n",omp_get_thread_num(),sx,ex,work_x_thr);
-		#pragma omp atomic
-		lineStr+=1;
+			printf("thread %d: %d-%d (%d)\n",omp_get_thread_num(),sx,ex,work_x_thr);
+			#pragma omp atomic
+			lineStr+=1;
 		#endif
 		
 		
@@ -969,14 +977,14 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 				
 				free(fromb);
 				#ifdef TIME
-				if(omp_get_thread_num()==0)
-					durataMemory+=durataMemoryT;
-				 #endif
+					if(omp_get_thread_num()==0)
+						durataMemory+=durataMemoryT;
+				#endif
 			}
 			#ifdef DEBUG
-			#pragma omp atomic
-			totSo+=1;
-			printf("\033[%d;0HCompletato %d/%d  (%s ) [%d/%d]           ",lineStr,totOp,nThr,completo.c_str(),totSo,num_source);
+				#pragma omp atomic
+				totSo+=1;
+				printf("\033[%d;0HCompletato %d/%d  (%s ) [%d/%d]           ",lineStr,totOp,nThr,completo.c_str(),totSo,num_source);
 			#endif
 			
 		}
@@ -992,6 +1000,10 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	#ifdef DEBUG
 	printf("\033[%d;1HCompletato %d/%d                                                                        ",lineStr,totOp,nThr);
 	#endif
+	
+	
+	totOp=0;
+	totSo=0;
 	
 	#pragma omp barrier
 	
@@ -1102,7 +1114,7 @@ bool ** succinta(int *Vertices, Hyperarc *Edges, Hypervector *Set, int num_verti
 	
 	printf("Succint start\n");
 	#ifdef DEBUG
-	lineStr+=1;
+		lineStr+=1;
 	#endif
 	
 	gpuErrchk(cudaMalloc((void**) &adjMatrix_DEV, sizeof(bool*) * num_source));
@@ -1164,7 +1176,7 @@ bool ** succinta(int *Vertices, Hyperarc *Edges, Hypervector *Set, int num_verti
 		
 	printf("Prepare all\n");
 	#ifdef DEBUG
-	lineStr+=1;
+		lineStr+=1;
 	#endif
 		
 	succintaKernel<<<MAX_BLOCKS_B, MAX_THREADS>>>(Vertices_DEV, Edges_DEV, set_DEV, num_vertices, num_edges, num_source, adjMatrix_DEV); 
@@ -1175,7 +1187,7 @@ bool ** succinta(int *Vertices, Hyperarc *Edges, Hypervector *Set, int num_verti
 	
 	printf("Succinted\n");
 	#ifdef DEBUG
-	lineStr+=1;
+		lineStr+=1;
 	#endif
 	cudaMemcpy(adjMatrix, adjMatrix_DEV, sizeof(bool)* num_source, cudaMemcpyDeviceToHost);
 	gpuErrchk(cudaGetLastError());
@@ -1283,7 +1295,7 @@ bool ** preProcess(int *Vertices, Hypervector *Set, int num_vertices,int num_sou
 	
 	printf("Support Matrix operation start\n");
 	#ifdef DEBUG
-	lineStr+=1;
+		lineStr+=1;
 	#endif
 	
 	gpuErrchk(cudaMalloc((void**) &supMat_DEV, sizeof(bool*) * num_vertices));
@@ -1329,7 +1341,7 @@ bool ** preProcess(int *Vertices, Hypervector *Set, int num_vertices,int num_sou
 		
 	printf("Prepare all\n");
 	#ifdef DEBUG
-	lineStr+=1;
+		lineStr+=1;
 	#endif
 		
 	prePropKernel<<<MAX_BLOCKS_B, MAX_THREADS>>>(Vertices_DEV, set_DEV, num_vertices, num_source, supMat_DEV); 
@@ -1369,9 +1381,9 @@ int main(int argn, char ** args){
 	system("cls");
 	#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
 		printf("C++17\n");
-	#ifdef DEBUG
-		lineStr+=1;
-	#endif
+		#ifdef DEBUG
+			lineStr+=1;
+		#endif
     #endif
 	
 	
@@ -1384,9 +1396,9 @@ int main(int argn, char ** args){
 	int num_vertices=0, num_edges=0, num_initial=0;
 	
 	#ifdef FILE_OUT
-	#ifdef TIME
-	int  num_edges_init=0, num_real_initial=0;
-	#endif 
+		#ifdef TIME
+			int  num_edges_init=0, num_real_initial=0;
+		#endif 
 	#endif
 	bool argg=false,thName=false;
 	std::string file_name="                    ";
@@ -1415,183 +1427,185 @@ int main(int argn, char ** args){
 			#endif
 		}
 		#ifdef TIME
-		begin = std::chrono::high_resolution_clock::now();
+			begin = std::chrono::high_resolution_clock::now();
 		#endif
 		readGraph(file_name,Vertices,num_vertices, Edges, num_edges, initial, num_initial);
 		
 		#ifdef TIME
-		end = std::chrono::high_resolution_clock::now();
+			end = std::chrono::high_resolution_clock::now();
 		#endif
 			
 	}else{
 		
 		#ifdef TIME
-		begin = std::chrono::high_resolution_clock::now();
+			begin = std::chrono::high_resolution_clock::now();
 		#endif
 		readGraph("prova.txt",Vertices, num_vertices, Edges, num_edges, initial, num_initial);
 		
 		#ifdef TIME
-		end = std::chrono::high_resolution_clock::now();
+			end = std::chrono::high_resolution_clock::now();
 		#endif
 	}
 	
 	#ifdef FILE_OUT
-	#ifdef TIME
-	num_edges_init = num_edges;
-	#endif
+		#ifdef TIME
+			num_edges_init = num_edges;
+		#endif
 	#endif
 	
 	#ifdef TIME
-	durataRead = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin ).count();
-	#ifdef DEBUG
-	printf("reading time: %lu ms\n",durataRead);
-	lineStr++;
-	printf("CPU threads: %d\nGPU Block:%d [%d] - %d\nGPU threads: %d\n", nThr,MAX_BLOCKS_A,MAX_BLOCKS_AI,MAX_BLOCKS_B,MAX_THREADS);
-	lineStr+=3;
+		durataRead = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin ).count();
+		#ifdef DEBUG
+			printf("reading time: %lu ms\n",durataRead);
+			lineStr+=1;
+		#endif
 	#endif
+	#ifdef DEBUG
+		printf("CPU threads: %d\nGPU Block:%d [%d] - %d\nGPU threads: %d\n", nThr,MAX_BLOCKS_A,MAX_BLOCKS_AI,MAX_BLOCKS_B,MAX_THREADS);
+		lineStr+=3;
 	#endif
 	
 	#ifndef HIDE
-	printf("Hyperarc: %d\n",num_edges);
-	#ifdef DEBUG
-	lineStr++;
-	#endif
-	for(int i=0; i<(num_edges); i++){
-		printf("(HA {");
-		for(int j=0; j<(*Edges)[i].len_fr; j++){
-			printf("%d",(*Edges)[i].from[j]);
-			if(j!=((*Edges)[i].len_fr)-1) printf(",");
+		printf("Hyperarc: %d\n",num_edges);
+		#ifdef DEBUG
+			lineStr++;
+		#endif
+		for(int i=0; i<(num_edges); i++){
+			printf("(HA {");
+			for(int j=0; j<(*Edges)[i].len_fr; j++){
+				printf("%d",(*Edges)[i].from[j]);
+				if(j!=((*Edges)[i].len_fr)-1) printf(",");
+			}
+			printf("} %d)\n",(*Edges)[i].to);
+			#ifdef DEBUG
+				lineStr++;
+			#endif
 		}
-		printf("} %d)\n",(*Edges)[i].to);
+		
+		printf("Vertices: %d\n",num_vertices);
 		#ifdef DEBUG
-		lineStr++;
+			lineStr++;
 		#endif
-	}
-	
-	printf("Vertices: %d\n",num_vertices);
-	#ifdef DEBUG
-	lineStr++;
+		
+		for(int i=0; i<num_vertices; i++){
+			printf("(VE %d)\n",(*Vertices)[i]);
+			#ifdef DEBUG
+				lineStr++;
+			#endif
+		}
+		
 	#endif
-	for(int i=0; i<num_vertices; i++){
-		printf("(VE %d)\n",(*Vertices)[i]);
-		#ifdef DEBUG
-		lineStr++;
-		#endif
-	}
 	
-	#endif
 	#ifndef NTAB
-	printf("Hypervector: %d\n",num_initial);
-	#ifdef DEBUG
-	lineStr++;
-	#endif
-	
-	for(int i=0; i<(num_initial); i++){
-		printf("(HV {");
-		for(int j=0; j<(*initial)[i].len; j++){
-			printf("%d",(*initial)[i].vectors[j]);
-			if(j!=((*initial)[i].len)-1) printf(",");
-		}
-		printf("}, %d, %d)\n",(*initial)[i].len, (*initial)[i].real?1:0);
+		printf("Hypervector: %d\n",num_initial);
 		#ifdef DEBUG
-		lineStr++;
+			lineStr++;
 		#endif
-	}
+		
+		for(int i=0; i<(num_initial); i++){
+			printf("(HV {");
+			for(int j=0; j<(*initial)[i].len; j++){
+				printf("%d",(*initial)[i].vectors[j]);
+				if(j!=((*initial)[i].len)-1) printf(",");
+			}
+			printf("}, %d, %d)\n",(*initial)[i].len, (*initial)[i].real?1:0);
+			#ifdef DEBUG
+				lineStr++;
+			#endif
+		}
 	#endif
 	#ifndef NO_INPUT
-	printf("Press ENTER to start\n");
-	
-	getchar();
-	#ifdef DEBUG
-	lineStr+=2;
-	#endif
+		printf("Press ENTER to start\n");
+		
+		getchar();
+		#ifdef DEBUG
+			lineStr+=2;
+		#endif
 	#endif
 	
 	#ifdef TIME
-	begin = std::chrono::high_resolution_clock::now();
+		begin = std::chrono::high_resolution_clock::now();
 	#endif
 	
 	MatrixAdj = succinta(*Vertices, *Edges, *initial, num_vertices, num_edges, num_initial);
 	supMat = preProcess(*Vertices, *initial, num_vertices, num_initial);
 	
 	#ifdef TIME
-	end = std::chrono::high_resolution_clock::now();
-	durataSucc = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin).count();
-	begin = std::chrono::high_resolution_clock::now();
+		end = std::chrono::high_resolution_clock::now();
+		durataSucc = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin).count();
+		begin = std::chrono::high_resolution_clock::now();
 	#endif
 	
 	#ifdef DEBUG
-	#ifndef NTAB
-	for(int i=0; i<num_initial; i++){
-		for(int j=0; j<num_vertices && (*initial)[i].real; j++)
-			printf("%d ",MatrixAdj[i][j]? 1:0);
-		if((*initial)[i].real) {
-			printf("\n");
-			lineStr+=1;
-		}
-	}
-	printf("\n\n");
-	lineStr+=2;
-	
-	#endif
+		#ifndef NTAB
+			for(int i=0; i<num_initial; i++){
+				for(int j=0; j<num_vertices && (*initial)[i].real; j++)
+					printf("%d ",MatrixAdj[i][j]? 1:0);
+				if((*initial)[i].real) {
+					printf("\n");
+					lineStr+=1;
+				}
+			}
+			printf("\n\n");
+			lineStr+=2;
+		
+		#endif
 	#endif
 	
 	MatrixAdj = gpu_trans_succ(MatrixAdj, *initial, num_initial, num_vertices, num_edges, supMat);
 
 	
 	#ifdef TIME
-	end = std::chrono::high_resolution_clock::now();
-	durataClos = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin).count();
+		end = std::chrono::high_resolution_clock::now();
+		durataClos = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin).count();
 	#endif
 	
 	printf("\n");
 	#ifdef DEBUG
-	lineStr+=2;
+		lineStr+=2;
 	#endif
 	#ifndef NTAB
-	for(int i=0; i<num_initial; i++){
-		for(int j=0; j<num_vertices && (*initial)[i].real; j++)
-			printf("%d ",MatrixAdj[i][j]? 1:0);
-		if((*initial)[i].real) {
-			printf("\n");
-			#ifdef DEBUG
-			lineStr+=1;
-			#endif
+		for(int i=0; i<num_initial; i++){
+			for(int j=0; j<num_vertices && (*initial)[i].real; j++)
+				printf("%d ",MatrixAdj[i][j]? 1:0);
+			if((*initial)[i].real) {
+				printf("\n");
+				#ifdef DEBUG
+					lineStr+=1;
+				#endif
+			}
 		}
-	}
 	#endif
 	
 	#ifdef DEBUG
-	printf("END\n");
-	#ifdef DEBUG
-	lineStr++;
-	#endif
-	#ifdef TIME 
-	durata = durataRead+durataSucc+durataClos;
-	printf("::durata: %lu ms\n",durata);
-	#ifdef DEBUG
-	lineStr++;
-	#endif
-	#endif
+		printf("END\n");
+		lineStr++;
+	
+		#ifdef TIME 
+			durata = durataRead+durataSucc+durataClos;
+			printf("::durata: %lu ms\n",durata);
+			lineStr++;
+		#endif
+		
 	#endif
 	
 	
 	#ifdef FILE_OUT
-	printf("Writing on file");
-	if(argn>1){
-		
-		file_name = (file_name.substr(0,file_name.find(".", 2)) + ("_new.txt"));
-		writeGraph(MatrixAdj,num_vertices, *initial, num_initial, num_edges, file_name );
-	}else
-		writeGraph(MatrixAdj,num_vertices, *initial, num_initial, num_edges, "prova_new.txt");
-	#ifdef TIME
-		for(int i=0; i<num_initial; i++){
-			if((*initial)[i].real) {
-				num_real_initial++;
+		printf("Writing on file");
+		if(argn>1){
+			
+			file_name = (file_name.substr(0,file_name.find(".", 2)) + ("_new.txt"));
+			writeGraph(MatrixAdj,num_vertices, *initial, num_initial, num_edges, file_name );
+		}else
+			writeGraph(MatrixAdj,num_vertices, *initial, num_initial, num_edges, "prova_new.txt");
+		#ifdef TIME
+			for(int i=0; i<num_initial; i++){
+				if((*initial)[i].real) {
+					num_real_initial++;
+				}
 			}
-		}
-		writeTime(num_vertices,num_edges_init, num_real_initial, num_edges, num_initial);
-	#endif
+			writeTime(num_vertices,num_edges_init, num_real_initial, num_edges, num_initial);
+		#endif
 	#endif
 	printf("\nEND");
 	
