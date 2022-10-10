@@ -65,16 +65,32 @@ std version:
 
 //GPU
 #ifndef MAX_THREADS
-#define MAX_THREADS 128
+	#ifndef NO_DOUBLE
+		#define MAX_THREADS 128
+	#else 
+		#define MAX_THREADS 1
+	#endif
 #endif
 #ifndef MAX_BLOCKS_A
-#define MAX_BLOCKS_A 2
+	#ifndef NO_DOUBLE
+		#define MAX_BLOCKS_A 2
+	#else
+		#define MAX_BLOCKS_A 1
+	#endif
 #endif
 #ifndef MAX_BLOCKS_AI
-#define MAX_BLOCKS_AI 2
+	#ifndef NO_DOUBLE
+		#define MAX_BLOCKS_AI 2
+	#else
+		#define MAX_BLOCKS_AI 1
+	#endif
 #endif
 #ifndef MAX_BLOCKS_B
-#define MAX_BLOCKS_B 4
+	#ifndef NO_DOUBLE
+		#define MAX_BLOCKS_B 4
+	#else
+		#define MAX_BLOCKS_B 1
+	#endif
 #endif
 //CPU
 #ifdef NTHR
@@ -885,7 +901,7 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	
 	int len_frT, sum=0;
 	#ifdef DEBUG
-		int totOp, totSo;
+		int totOp=0, totSo=0;
 	#endif
 	std::string completo = "";
 	
@@ -939,10 +955,12 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 	#endif
 	#ifdef DEBUG	
 		#pragma omp parallel shared(adjMatrix_DEV, adjMatrix, set_DEV,Set, from, num_vertices, num_source, completo, totOp, totSo) private(fromb) num_threads(nThr)
+		{
 	#else
 		#pragma omp parallel shared(adjMatrix_DEV, adjMatrix, set_DEV,Set, from, num_vertices, num_source, completo) private(fromb) num_threads(nThr)
+		{
 	#endif
-	{
+	
 		int work_x_thr  = ceil(num_source/(nThr));
 		int sx 		    = omp_get_thread_num() * work_x_thr;
 		int ex 		    = sx + work_x_thr;
