@@ -15,6 +15,7 @@
 #			 			-D NTHR : number of cpu threads 								#
 #			 			-D NTAB : hide the succinted graph outupt						#
 #			 			-D NO_DOUBLE : to use original BFS CUDA 						#
+#			 			-D NO_CLS : remove the cls command line 						#
 #																						#
 #########################################################################################
 */
@@ -667,10 +668,10 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 			ve = thidI%num_vertices;
 			if(adjMatrix[so][ve] && supMat_DEV[idVert][so]) 
 				if(Visited[ve]==false || Cost[ve]==0){
-			
-						Cost[ve] = Cost[idVert]+1;
-						FrontierUpdate[ve] = true;
-					}		
+		
+					Cost[ve] = Cost[idVert]+1;
+					FrontierUpdate[ve] = true;
+				}		
 		
 		}
 	}
@@ -726,9 +727,9 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 						if(adjMatrix[so][ve] && supMat_DEV[thidI][so]) 
 							if(Visited[ve]==false || Cost[ve]==0){
 						
-									Cost[ve] = Cost[thidI]+1;
-									FrontierUpdate[ve] = true;
-								}		
+								Cost[ve] = Cost[thidI]+1;
+								FrontierUpdate[ve] = true;
+							}		
 					
 					}
 				#endif
@@ -1394,7 +1395,9 @@ Input:
 */
 int main(int argn, char ** args){
 	
+	#ifndef NO_CLS
 	system("cls");
+	#endif
 	#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
 		printf("C++17\n");
 		#ifdef DEBUG
