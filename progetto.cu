@@ -15,7 +15,7 @@
 #			 			-D NTHR : number of cpu threads 								#
 #			 			-D NTAB : hide the succinted graph outupt						#
 #			 			-D NO_DOUBLE : to use original BFS CUDA 						#
-#			 			-D NO_CLS : remove the cls command line 						#
+#			 			-D DYNAMIC : (EXPERIMENTAL) automatic num blocks/threads		#
 #																						#
 #########################################################################################
 */
@@ -71,33 +71,52 @@ std version:
 	#else 
 		#define MAX_THREADS 1
 	#endif
+#elif defined NO_DOUBLE
+	#define MAX_THREADS 1
 #endif
-#ifndef MAX_BLOCKS_A
-	#ifndef NO_DOUBLE
-		#define MAX_BLOCKS_A 2
-	#else
-		#define MAX_BLOCKS_A 1
-	#endif
-#endif
-#ifndef MAX_BLOCKS_AI
-	#ifndef NO_DOUBLE
-		#define MAX_BLOCKS_AI 2
-	#else
-		#define MAX_BLOCKS_AI 1
-	#endif
-#endif
-#ifndef MAX_BLOCKS_B
-	#ifndef NO_DOUBLE
-		#define MAX_BLOCKS_B 4
-	#else
-		#define MAX_BLOCKS_B 1
-	#endif
-#endif
+
 //CPU
 #ifdef NTHR
 	int nThr = NTHR;
 #else
 	int nThr;
+#endif
+
+#ifdef DYNAMIC
+int MAX_BLOCKS_A;
+int MAX_BLOCKS_AI;
+int MAX_BLOCKS_B;
+#else
+	
+	#ifndef MAX_BLOCKS_A
+		#ifndef NO_DOUBLE
+			#define MAX_BLOCKS_A 2
+		#else
+			#define MAX_BLOCKS_A 1
+		#endif
+	#elif defined NO_DOUBLE
+		#define MAX_BLOCKS_A 1
+	#endif
+
+	#ifndef MAX_BLOCKS_AI
+		#ifndef NO_DOUBLE
+			#define MAX_BLOCKS_AI 2
+		#else
+			#define MAX_BLOCKS_AI 1
+		#endif
+	#elif defined NO_DOUBLE
+		#define MAX_BLOCKS_AI 1
+	#endif
+
+	#ifndef MAX_BLOCKS_B
+		#ifndef NO_DOUBLE
+			#define MAX_BLOCKS_B 4
+		#else
+			#define MAX_BLOCKS_B 1
+		#endif
+	#elif defined NO_DOUBLE
+		#define MAX_BLOCKS_B 1
+	#endif
 #endif
 
 #ifdef TIME
@@ -221,7 +240,7 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 			if(pref=="INI"){
 				num_vertices = std::stoi(line.substr(3, (int)line.find(",")-3));
 				num_edges = std::stoi(line.substr(line.find(",")+1));
-				
+					
 				printf("Vertici %d, Edges %d ", num_vertices, num_edges);
 				
 				*Vertices = (int*) malloc(sizeof(int)*num_vertices);
@@ -406,6 +425,15 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 		#endif
 		
 	}
+	#ifdef DYNAMIC
+	
+	cudaDeviceProp prop;
+	gpuErrchk( cudaGetDeviceProperties( &prop, 0 ) );
+		
+	MAX_BLOCKS_A = min(max(int(ceil(num_vertices/1000)),0)+1,prop.multiProcessorCount/3);
+	MAX_BLOCKS_AI = min(max(int(ceil((num_initial*num_vertices)/1000)),1)+1,int(prop.multiProcessorCount/MAX_BLOCKS_A)+2);
+	MAX_BLOCKS_B = int(prop.multiProcessorCount);
+	#endif
 	
 }
 
@@ -698,8 +726,11 @@ Input:
 MODIFY:
 	Cost, FrontierUpdate, Frontier, Visited, end
 */
-
+#ifdef DYNAMIC
+__global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, bool ** supMat_DEV, int MAX_BLOCKS_AI){
+#else
 __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, bool ** supMat_DEV){
+#endif
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI;
 	
@@ -718,6 +749,7 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 				Visited[thidI]=true;
 				
 				#ifndef NO_DOUBLE
+					
 					neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source, supMat_DEV);
 				#else
 					for(int NN=0; NN<((num_source*num_vertices)); NN++){
@@ -834,8 +866,11 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 		next_HOS = 0;
 		gpuErrchk(cudaMemcpy(next_DEV, &next_HOS, sizeof(int), cudaMemcpyHostToDevice));
 		
-		
+		#ifdef DYNAMIC
+		bfs_M<<<MAX_BLOCKS_A, (MAX_THREADS) >>>(adjMatrix_DEV, num_vertices, num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV, supMat_DEV, MAX_BLOCKS_AI);
+		#else
 		bfs_M<<<MAX_BLOCKS_A, (MAX_THREADS) >>>(adjMatrix_DEV, num_vertices, num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV, supMat_DEV);
+		#endif
 		cudaDeviceSynchronize();
 		gpuErrchk(cudaGetLastError());
 	
@@ -1395,16 +1430,14 @@ Input:
 */
 int main(int argn, char ** args){
 	
-	#ifndef NO_CLS
 	system("cls");
-	#endif
 	#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
 		printf("C++17\n");
 		#ifdef DEBUG
 			lineStr+=1;
 		#endif
     #endif
-	
+		
 	
 	Hyperarc** Edges	  = (Hyperarc**) malloc(sizeof(Hyperarc*));
 	Hypervector** initial = (Hypervector**) malloc(sizeof(Hypervector*));
@@ -1422,6 +1455,7 @@ int main(int argn, char ** args){
 	bool argg=false,thName=false;
 	std::string file_name="                    ";
 	
+	
 	if(argn>1){
 		for(int i=0; i<argn; i++)
 			if(std::string(args[i]).substr(0,4) == "-nT="){
@@ -1438,11 +1472,15 @@ int main(int argn, char ** args){
 					file_name = args[i];
 		if(!argg){
 			#ifndef NTHR
-				#pragma omp parallel shared(nThr)
-				{
-					if(omp_get_thread_num()==0)
-						nThr = omp_get_max_threads();
-				}
+				#ifndef NO_DOUBLE
+					#pragma omp parallel shared(nThr)
+					{
+						if(omp_get_thread_num()==0)
+							nThr = omp_get_max_threads();
+					}
+				#else
+					nThr = 1;
+				#endif
 			#endif
 		}
 		#ifdef TIME
@@ -1472,6 +1510,7 @@ int main(int argn, char ** args){
 		#endif
 	#endif
 	
+	
 	#ifdef TIME
 		durataRead = std::chrono::duration_cast<std::chrono::milliseconds>( end - begin ).count();
 		printf("reading time: %lu ms\n",durataRead);
@@ -1483,6 +1522,7 @@ int main(int argn, char ** args){
 		printf("CPU threads: %d\nGPU Block:%d [%d] - %d\nGPU threads: %d\n", nThr,MAX_BLOCKS_A,MAX_BLOCKS_AI,MAX_BLOCKS_B,MAX_THREADS);
 		lineStr+=3;
 	#endif
+	
 	
 	#ifndef HIDE
 		printf("Hyperarc: %d\n",num_edges);
