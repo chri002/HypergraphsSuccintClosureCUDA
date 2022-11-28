@@ -34,6 +34,7 @@ Copy all file in a folder, if you are using a windows PC run _compiler.bat_ to c
 &emsp;&emsp;-D NO_INPUT : remove enter click <br />
 &emsp;&emsp;-D NTAB : hide the succinted graph outupt <br />
 &emsp;&emsp;-D NO_DOUBLE : to use only external parallelization BFS CUDA  <br />
+&emsp;&emsp;-D DYNAMIC : Automatic blocks number (Experimental)  <br />
 
 ## Work:
 At begin generate the hypergraphs with _generator_ and then lunch _progetto_<br />
