@@ -496,8 +496,11 @@ void writeGraph(bool** matrixSuc, int num_vertices, Hypervector* Sources, int nu
 	*/
 	/*
 	Input:
-		num_vertices : number of integers pointed from Vertices
-		num_edges : number of hyperarcs pointed from Edges
+		num_vertices : number of integers
+		num_edges : number of hyperarcs
+		num_source : number of source
+		num_edge_final : number of hyperarcs after the succincted transitive closure
+		num_source_total : number of source plus hidden source
 	*/
 	void writeTime(int num_vertices, int num_edges, int num_source, int num_edge_final, int num_source_total){
 		std::ofstream myFile;
@@ -556,10 +559,9 @@ Input:
 	Visited : tracks the visited nodes during BFS
 	Cost : the distance between start node and the other node
 	next : check wheater to proceed or not
-	end : to share the end of operations
 !!!!!!
 MODIFY:
-	Frontier, Visited, next, FrontierUpdate, end
+	Frontier, Visited, next, FrontierUpdate
 */
 __global__ void bfs_update(int len, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * next){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -656,7 +658,6 @@ Input:
 	len : size of arr
 return:
 	true if element exist
-!!!!!!
 */
 __device__ bool includes(int x, int * arr, int len){
 	bool ok=false;
@@ -679,6 +680,7 @@ Input:
 	Cost : the distance between start node and the other node
 	Sources : list of all sources
 	num_source : size of Sources array
+	supMat : support matrix to know if a node belongs to a source or not
 !!!!!!
 MODIFY:
 	Cost, FrontierUpdate
@@ -721,10 +723,13 @@ Input:
 	Visited : tracks the visited nodes during BFS
 	Cost : the distance between start node and the other node
 	Sources : list of all sources
-	end : to share the end of operations
+	supMat_DEV : support matrix to know if a node belongs to a source or not 
+	!
+	(MAX_BLOCKS_AI : dynamic kernel block)
+	!
 !!!!!!
 MODIFY:
-	Cost, FrontierUpdate, Frontier, Visited, end
+	Cost, FrontierUpdate, Frontier, Visited
 */
 #ifdef DYNAMIC
 __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * Cost, Hypervector * Sources, bool ** supMat_DEV, int MAX_BLOCKS_AI){
@@ -783,6 +788,8 @@ Input:
 	num_vertices : number of vertices in the graph
 	num_source : size of Sources array
 	sourceStart : the id of source, where the BFS begins
+	TOK : time check (openmp control)
+	supMat_DEV : support matrix to know if a node belongs to a source or not (GPU)
 Output:
 	list of node visited
 
@@ -918,6 +925,8 @@ Input:
 	num_vertices : number of vertices in the graph
 	num_source : size of Sources array
 	sourceStart : the id of source, where the BFS begins
+	TOK : time check (openmp control)
+	supMat_DEV : support matrix to know if a node belongs to a source or not (CPU)
 Output:
 	list of node visited
 
@@ -1041,6 +1050,7 @@ Input:
 	num_source : number of sources in hyper-graph
 	num_vertices : number of integers pointed from Vertices
 	num_edges : number of hyperarcs in hyper-graph
+	supMat_DEV : support matrix to know if a node belongs to a source or not (GPU)
 Output:
 	Adjacency Matrix of transitive succint closure of MatrixAdj
 !!!!!!
