@@ -16,7 +16,7 @@
 #			 			-D NTAB : hide the succinted graph outupt						#
 #			 			-D NO_DOUBLE : to use original BFS CUDA 						#
 #			 			-D DYNAMIC : (EXPERIMENTAL) automatic num blocks/threads		#
-#																						#
+#						-D CPU : BFS on CPU 											#
 #########################################################################################
 */
 
@@ -905,6 +905,131 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 }
 
 
+/*#############################################################*/
+
+/*   ## CPU ONLY ##
+Succint closure with BFS visit from sourceStart (Source)
+*/
+/*
+Input:
+	adjMatrix : hyper-graph adjacency matrix (Device pointer)
+	Set: list of all sources
+	Set_DEV: list of all sources (Device pointer)
+	num_vertices : number of vertices in the graph
+	num_source : size of Sources array
+	sourceStart : the id of source, where the BFS begins
+Output:
+	list of node visited
+
+*/
+bool * gpu_bfs_suc_CPU(bool ** adjMatrix, Hypervector *Set, int num_vertices, int num_source, int sourceStart, bool TOK, bool ** supMat_DEV){
+	bool * ret;
+				
+	int * Cost_HOS;
+	bool * Frontier_HOS;
+	bool * FrontierUpdate_HOS;
+	bool * Visited_HOS;
+	
+	int next_HOS;
+	
+	
+	#ifdef TIME
+		if(TOK==0)
+			begin1 = std::chrono::high_resolution_clock::now();
+	#endif
+	Cost_HOS = (int*) malloc(sizeof(int)*num_vertices);
+	Frontier_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
+	FrontierUpdate_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
+	Visited_HOS = (bool*) malloc(sizeof(bool)*num_vertices);
+		
+	ret = (bool*) malloc(sizeof(bool) * num_vertices);
+	
+		
+	
+	
+	for(int i=0; i<num_vertices; i++){
+		ret[i] = false;
+		Cost_HOS[i] = -1;
+	}
+	
+	for(int i=0; i<num_vertices; i++){
+		Frontier_HOS[i] = false;
+		FrontierUpdate_HOS[i] = false;
+		Visited_HOS[i] = false;
+	}
+	
+	
+	
+	for(int i=0; i<Set[sourceStart].len; i++){
+		Cost_HOS[Set[sourceStart].vectors[i]] 		= 0;
+		Frontier_HOS[Set[sourceStart].vectors[i]] 	= true;
+		Visited_HOS[Set[sourceStart].vectors[i]] 		= true;
+		
+					
+	}
+	
+	#ifdef TIME
+		if(TOK==0){
+			end1 = std::chrono::high_resolution_clock::now();
+			durataMemoryT = std::chrono::duration_cast<std::chrono::milliseconds>( end1 - begin1).count();
+		}
+	#endif
+	
+	
+	
+	next_HOS = 1;
+	int so,ve,thidI;
+	while(next_HOS==1){
+		next_HOS = 0;
+				
+		for(int Pass=0; Pass<num_vertices; Pass++){
+			thidI = Pass;
+			
+				if(Frontier_HOS[thidI]==true){
+					Frontier_HOS[thidI]=false;
+					Visited_HOS[thidI]=true;
+					
+					for(int NN=0; NN<((num_source*num_vertices)); NN++){
+		
+						so = NN/num_vertices;
+						ve = NN%num_vertices;
+						if(adjMatrix[so][ve] && supMat_DEV[thidI][so]) 
+							if(Visited_HOS[ve]==false || Cost_HOS[ve]==0){
+						
+								Cost_HOS[ve] = Cost_HOS[thidI]+1;
+								FrontierUpdate_HOS[ve] = true;
+							}		
+					
+					}
+				}
+		}
+	
+				
+		for(int Pass=0; Pass<num_vertices; Pass++){
+		thidI = Pass;
+			
+			if(FrontierUpdate_HOS[thidI]){
+				Frontier_HOS[thidI] = true;
+				Visited_HOS[thidI] = true;
+				next_HOS = 1;
+				FrontierUpdate_HOS[thidI] = false;
+				
+			
+			}
+		}
+		
+	}
+
+	
+	for(int i=0; i<num_vertices; i++)
+		if(Cost_HOS[i]>0){
+			ret[i]=true;
+		}
+		
+	return ret;
+}
+
+/*#############################################################*/
 
 /*   ## CPU ##
 Prepare the data and lunch BFS
@@ -945,6 +1070,41 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		begin1 = std::chrono::high_resolution_clock::now();
 	#endif
 	
+	
+	#ifdef CPU
+	
+	bool ** supMat, **time;
+
+	supMat= (bool**) malloc(sizeof(bool*) * num_vertices);
+	time= (bool**) malloc(sizeof(bool*) * num_vertices);
+	
+	
+	cudaMemcpy(time, supMat_DEV, sizeof(bool*)*num_vertices, cudaMemcpyDeviceToHost);
+	gpuErrchk(cudaGetLastError());
+	
+		
+	for(int i=0; i<num_vertices; i++){
+		supMat[i] = (bool*) malloc(sizeof(bool)*num_source);
+	}
+	for(int i=0; i<num_vertices; i++){
+	
+		fromb = (bool*) malloc(sizeof(bool) * num_source);
+		cudaMemcpy(fromb, time[i], sizeof(bool)* num_source, cudaMemcpyDeviceToHost);
+		supMat[i] = (bool*) malloc(sizeof(bool)*num_source);
+		//using std
+		#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
+			//##c++17##
+			std::copy(std::execution::par, fromb, fromb+num_source, supMat[i]);
+		#else
+			//##c++13##
+			std::memcpy(supMat[i],fromb,(num_source)*sizeof(bool));
+		#endif
+	}
+	
+	
+	cudaGetLastError();	
+	#endif
+		
 	adjMatrix = (bool**) malloc(sizeof(bool*) * num_source);
 	gpuErrchk(cudaMalloc((void**) &adjMatrix_DEV, sizeof(bool*) * num_source));
 	
@@ -1018,8 +1178,11 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 		for(int i=sx; i<ex; i++){
 			if((Set[i].real)){
 				num_att = i;
+				#ifdef CPU				
+				fromb = gpu_bfs_suc_CPU(MatrixAdj, Set, num_vertices, num_source, num_att, omp_get_thread_num()==0, supMat); 
+				#else
 				fromb = gpu_bfs_suc(adjMatrix_DEV, Set, set_DEV, num_vertices, num_source, num_att, omp_get_thread_num()==0, supMat_DEV); 
-				
+				#endif
 				t_num_edges = 0;
 				
 				adjMatrix[num_att] = (bool*)malloc(sizeof(bool)*num_vertices);
@@ -1406,7 +1569,9 @@ bool ** preProcess(int *Vertices, Hypervector *Set, int num_vertices,int num_sou
 	#ifdef DEBUG
 	lineStr+=1;
 	#endif
-	cudaMemcpy(supMat, supMat_DEV, sizeof(bool)* num_vertices, cudaMemcpyDeviceToHost);
+	
+	
+	
 	gpuErrchk(cudaGetLastError());
 	
 	
