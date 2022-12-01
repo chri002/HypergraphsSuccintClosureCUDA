@@ -35,6 +35,7 @@ Copy all file in a folder, if you are using a windows PC run _compiler.bat_ to c
 &emsp;&emsp;-D NTAB : hide the succinted graph outupt <br />
 &emsp;&emsp;-D NO_DOUBLE : to use only external parallelization BFS CUDA  <br />
 &emsp;&emsp;-D DYNAMIC : Automatic blocks number (Experimental)  <br />
+&emsp;&emsp;-D CPU : custom BFS runs only on CPU, the other parts run on GPU yet <br />
 
 ## Work:
 At begin generate the hypergraphs with _generator_ and then lunch _progetto_<br />
