@@ -21,7 +21,8 @@ Copy all file in a folder, if you are using a windows PC run _compiler.bat_ to c
 &emsp;\nvcc .\generator.cpp -o generator.exe <br />
 
 ### Succinct transitive closure of hypergraphs
-&emsp;nvcc -rdc=true -lineinfo -std=c++17 -Xcompiler -openmp .\progetto.cu -o progetto.exe <br />
+&emsp;nvcc -rdc=true -lineinfo -std=c++17 <Flags> -Xcompiler -openmp .\progetto.cu -o progetto.exe <br /></br>
+&emsp;Flags:</br>
 &emsp;&emsp;-D HIDE  : hide the output of graph# <br />
 &emsp;&emsp;-D DEBUG : show information on runtime <br />
 &emsp;&emsp;-D FILE_OUT <value> : export graph to file <br />
@@ -43,4 +44,3 @@ At begin generate the hypergraphs with _generator_ and then lunch _progetto_<br 
 &emsp;&emsp;generator.exe -v &lt;number of vertices&gt; -e &lt;number of edges&gt; -s &lt;number of supersets&gt;<br />
 
 &emsp;&emsp;progetto.exe "grafo.txt" <br />
-&emsp;&emsp;(PRESS ENTER WHEN REQUEST)
