@@ -17,6 +17,7 @@
 #			 			-D NO_DOUBLE : to use original BFS CUDA 						#
 #			 			-D DYNAMIC : (EXPERIMENTAL) automatic num blocks/threads		#
 #						-D CPU : BFS on CPU 											#
+#						-D SHARED : use shred memory (possible memory error)			#
 #########################################################################################
 */
 
@@ -689,6 +690,19 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 	int thid = (blockIdx.x*blockDim.x)+threadIdx.x;
 	int thidI;
 	int so, ve;
+	
+	#ifdef SHARED
+	extern __shared__ bool temp[];
+	
+	for(int Pass=0; Pass<ceilf((num_source/(gridDim.x*blockDim.x)))+1; Pass++){
+		thidI = thid + Pass*(gridDim.x*blockDim.x);
+		
+		if(thidI<num_source)
+			temp[thidI] = supMat_DEV[idVert][thidI];
+	}
+	
+	__syncthreads();
+	#endif
 			
 	for(int Pass=0; Pass<ceilf((num_source*num_vertices/(gridDim.x*blockDim.x)))+1; Pass++){
 		thidI = thid + Pass*(gridDim.x*blockDim.x);
@@ -696,7 +710,11 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 		if(thidI<num_source*num_vertices){
 			so = thidI/num_vertices;
 			ve = thidI%num_vertices;
+			#ifdef SHARED
+			if(adjMatrix[so][ve] && temp[so]) 
+			#else
 			if(adjMatrix[so][ve] && supMat_DEV[idVert][so]) 
+			#endif
 				if(Visited[ve]==false || Cost[ve]==0){
 		
 					Cost[ve] = Cost[idVert]+1;
@@ -755,7 +773,7 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 				
 				#ifndef NO_DOUBLE
 					
-					neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source, supMat_DEV);
+					neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS, num_vertices>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source, supMat_DEV);
 				#else
 					for(int NN=0; NN<((num_source*num_vertices)); NN++){
 		
