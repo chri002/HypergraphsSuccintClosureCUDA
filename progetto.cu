@@ -17,6 +17,7 @@
 #			 			-D NO_DOUBLE : to use original BFS CUDA 						#
 #			 			-D DYNAMIC : (EXPERIMENTAL) automatic num blocks/threads		#
 #						-D CPU : BFS on CPU 											#
+#						-D SHARED : shared memory on cuda (Memory Error not handle)		#
 #########################################################################################
 */
 
@@ -689,14 +690,35 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 	int thid = (blockIdx.x*blockDim.x)+threadIdx.x;
 	int thidI;
 	int so, ve;
-			
+	
+	
+	#ifdef SHARED
+	extern __shared__ bool temp[];
+	
+	for(int Pass=0; Pass<ceilf((num_source/(blockDim.x)))+1; Pass++){
+		thidI = threadIdx.x + Pass*(blockDim.x);
+		if(thidI<num_source){
+			temp[thidI] = supMat_DEV[idVert][thidI];
+		}
+	}
+
+	/*if(thid==0)
+		memcpy(temp, supMat_DEV[idVert], num_source);
+	*/
+	__syncthreads();
+	#endif
+	
 	for(int Pass=0; Pass<ceilf((num_source*num_vertices/(gridDim.x*blockDim.x)))+1; Pass++){
 		thidI = thid + Pass*(gridDim.x*blockDim.x);
 		
 		if(thidI<num_source*num_vertices){
 			so = thidI/num_vertices;
 			ve = thidI%num_vertices;
+			#ifdef SHARED
+			if(adjMatrix[so][ve] && temp[so]) 
+			#else
 			if(adjMatrix[so][ve] && supMat_DEV[idVert][so]) 
+			#endif
 				if(Visited[ve]==false || Cost[ve]==0){
 		
 					Cost[ve] = Cost[idVert]+1;
@@ -707,6 +729,10 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 	}
 	__syncthreads();
 	
+	#ifdef SHARED
+	
+	
+	#endif
 }
 
 
@@ -754,8 +780,11 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 				Visited[thidI]=true;
 				
 				#ifndef NO_DOUBLE
-					
-					neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source, supMat_DEV);
+					#ifdef SHARED
+						neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS, num_vertices>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source, supMat_DEV);
+					#else
+						neighOp_M<<<MAX_BLOCKS_AI, MAX_THREADS>>>(adjMatrix,thidI, num_vertices, FrontierUpdate, Visited, Cost, Sources, num_source, supMat_DEV);
+					#endif
 				#else
 					for(int NN=0; NN<((num_source*num_vertices)); NN++){
 		
@@ -1182,7 +1211,6 @@ bool ** gpu_trans_succ(bool ** MatrixAdj, Hypervector * Set, int num_source, int
 			#pragma omp atomic
 			lineStr+=1;
 		#endif
-		
 		
 		#pragma omp barrier
 		for(int i=sx; i<ex; i++){
