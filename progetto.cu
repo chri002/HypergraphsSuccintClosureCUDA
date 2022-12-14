@@ -59,6 +59,7 @@ std version:
 #include <chrono>
 #include <map>
 #include <utility>
+#include <cooperative_groups.h>
 
 #if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
 	#include <execution>
@@ -138,7 +139,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 {
    if (code != cudaSuccess) 
    {
-      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+      fprintf(stderr,"(%d) GPUassert: %s %s %d\n", code, cudaGetErrorString(code), file, line);
       if (abort) exit(code);
    }
 }
@@ -559,7 +560,10 @@ MODIFY:
 __global__ void bfs_update(int len, bool * Frontier, bool * FrontierUpdate, bool * Visited, int * next){
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI = 0;
-		
+	
+	cooperative_groups::thread_group g = (cooperative_groups::this_grid());
+	
+	
 	__syncthreads();
 	
 	for(int Pass=0; Pass<ceilf((len/(blockDim.x)))+1; Pass++){
@@ -576,7 +580,7 @@ __global__ void bfs_update(int len, bool * Frontier, bool * FrontierUpdate, bool
 		}
 	}
 	__syncthreads();
-	
+	g.sync();
 }
 
 
@@ -683,6 +687,8 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 	int thidI;
 	int so, ve;
 	
+	cooperative_groups::thread_group g = (cooperative_groups::this_grid());
+	
 	
 	#ifdef SHARED
 	extern __shared__ bool temp[];
@@ -721,10 +727,7 @@ __global__  void neighOp_M(bool ** adjMatrix, int idVert, int num_vertices,bool 
 	}
 	__syncthreads();
 	
-	#ifdef SHARED
-	
-	
-	#endif
+	g.sync();
 }
 
 
@@ -756,6 +759,8 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 #endif
 	int thid = blockIdx.x * blockDim.x + threadIdx.x;
 	int thidI;
+	
+	cooperative_groups::thread_group g = (cooperative_groups::this_grid());
 	
 	#ifdef NO_DOUBLE
 	int so,ve;
@@ -794,6 +799,8 @@ __global__ void bfs_M(bool ** adjMatrix, int num_vertices, int num_source, bool 
 			}
 	}
 	__syncthreads();
+	
+	g.sync();
 }
 
 
@@ -899,12 +906,10 @@ bool * gpu_bfs_suc(bool ** adjMatrix_DEV, Hypervector *Set, Hypervector *Set_DEV
 		#else
 		bfs_M<<<MAX_BLOCKS_A, (MAX_THREADS) >>>(adjMatrix_DEV, num_vertices, num_source, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, Cost_DEV, Set_DEV, supMat_DEV);
 		#endif
-		cudaDeviceSynchronize();
 		gpuErrchk(cudaGetLastError());
 	
 				
 		bfs_update<<<MAX_BLOCKS_A, (MAX_THREADS) >>>(num_vertices, Frontier_DEV, FrontierUpdate_DEV, Visited_DEV, next_DEV);
-		cudaDeviceSynchronize();
 		gpuErrchk(cudaGetLastError());
 	
 		gpuErrchk(cudaMemcpy(&next_HOS, next_DEV , sizeof(int), cudaMemcpyDeviceToHost));
