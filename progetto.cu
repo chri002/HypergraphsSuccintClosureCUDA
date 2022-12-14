@@ -298,10 +298,6 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 					
 				}
 				
-				for(int i=0; i<len_fr; i++)
-					printf("%d ",(*initial)[idxE].vectors[i]);
-				printf(", %d\n",(*initial)[idxE].real?1:0);
-				
 				idxE++;
 				
 			}else if(pref == "RGS" && succinto){
@@ -309,7 +305,6 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 				temp1 = line.find(",",temp);
 				temp2 = 0;
 				while(line.substr(temp)!="REG"){
-					printf("%s ",line.substr(temp).c_str());
 					if(line.substr(temp,1)=="1"){
 						(*Edges)[idxV] = {(*initial)[idxEe].vectors,NULL, (*initial)[idxEe].len, temp2};
 						idxV++;
@@ -317,10 +312,8 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 					temp2++;
 					
 					temp = line.find(",",temp+1)+1;
-					printf("%d\n",temp);
 					if(temp == 0) temp = line.find(" ",temp+4)+1;
 				}
-				printf(" %d\n",idxV);
 				idxEe++;
 			}else if(pref == "(HA"){
 				temp = line.find("}");
@@ -386,7 +379,6 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 		}else{
 			for(int i=0; i<num_real_source; i++){
 				for(int j=0; j<(*initial)[i].len; j++){
-					printf("%d ",(*initial)[i].vectors[j]);
 					manca[(*initial)[i].vectors[j]]=false;
 					
 				}
