@@ -59,6 +59,7 @@ std version:
 #include <chrono>
 #include <map>
 #include <utility>
+#include <math.h>
 #include <cooperative_groups.h>
 
 #if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
@@ -423,9 +424,15 @@ void readGraph(std::string FILE, int**& Vertices,int &num_vertices, Hyperarc**& 
 	
 	cudaDeviceProp prop;
 	gpuErrchk( cudaGetDeviceProperties( &prop, 0 ) );
-		
-	MAX_BLOCKS_A = min(max(int(ceil(num_vertices/1000)),0)+1,prop.multiProcessorCount/3);
-	MAX_BLOCKS_AI = min(max(int(ceil((num_initial*num_vertices)/1000)),1)+1,int(prop.multiProcessorCount/MAX_BLOCKS_A)+2);
+	
+	double (*ceiled)(double) = &ceil;
+	
+	#ifdef DPLUS
+		ceiled= &floor;
+	#endif
+	
+	MAX_BLOCKS_A = min(max(int((*ceiled)(num_vertices/1024)),0),prop.multiProcessorCount/3);
+	MAX_BLOCKS_AI = min(max(int((*ceiled)((num_initial*num_vertices)/1024)),1)+1,int(prop.multiProcessorCount/MAX_BLOCKS_A)+1);
 	MAX_BLOCKS_B = int(prop.multiProcessorCount);
 	#endif
 	
