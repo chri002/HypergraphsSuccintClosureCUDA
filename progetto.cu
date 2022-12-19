@@ -40,7 +40,7 @@ Work:
 	
 std version:
 	std::c++17 implementation with parallel copy 
-	std::c++98 memcpy sequential
+	std::c++13 memcpy sequential
 	
 	
 */
